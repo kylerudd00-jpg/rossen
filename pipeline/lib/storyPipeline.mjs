@@ -495,9 +495,46 @@ export async function fetchStories() {
 
 // ─── Image search ─────────────────────────────────────────────────────────────
 
-export async function searchImages(q) {
+function isUsableImage(info) {
+  if (!info) return false;
+  const mime = info.mime || "";
+  if (!["image/jpeg", "image/png", "image/webp"].includes(mime)) return false;
+  const { width, height } = info;
+  if (width && height) {
+    const ratio = height / width;
+    if (ratio < 0.25 || ratio > 3) return false; // skip extreme panoramas / tall crops
+    if (width < 400) return false; // skip low-res
+  }
+  return true;
+}
+
+// Source 1: Wikipedia page images — very reliable for major brands
+async function fetchWikipediaImages(brandName) {
+  const params = new URLSearchParams({
+    action: "query",
+    titles: brandName,
+    prop: "pageimages|images",
+    pithumbsize: "1200",
+    pilimit: "3",
+    imlimit: "20",
+    format: "json",
+    origin: "*",
+  });
+  const res = await fetch(`https://en.wikipedia.org/w/api.php?${params}`, { signal: AbortSignal.timeout(8000) });
+  const data = await res.json();
+  const pages = Object.values(data.query?.pages || {});
+  const urls = [];
+  for (const page of pages) {
+    // Main thumbnail
+    if (page.thumbnail?.source) urls.push(page.thumbnail.source);
+  }
+  return urls;
+}
+
+// Source 2: Wikimedia Commons text search
+async function fetchCommonsImages(query) {
   const searchParams = new URLSearchParams({
-    action: "query", list: "search", srsearch: q,
+    action: "query", list: "search", srsearch: query,
     srnamespace: "6", format: "json", srlimit: "20", origin: "*",
   });
   const searchRes = await fetch(`https://commons.wikimedia.org/w/api.php?${searchParams}`, { signal: AbortSignal.timeout(8000) });
@@ -507,27 +544,37 @@ export async function searchImages(q) {
 
   const infoParams = new URLSearchParams({
     action: "query", titles: titles.join("|"),
-    prop: "imageinfo", iiprop: "url|mime|size", iiurlwidth: "1200",
+    prop: "imageinfo", iiprop: "url|mime|size|thumburl", iiurlwidth: "1200",
     format: "json", origin: "*",
   });
   const infoRes = await fetch(`https://commons.wikimedia.org/w/api.php?${infoParams}`, { signal: AbortSignal.timeout(8000) });
   const infoData = await infoRes.json();
 
   return Object.values(infoData.query?.pages || {})
-    .filter((page) => {
-      const info = page.imageinfo?.[0];
-      if (!info) return false;
-      const mime = info.mime || "";
-      if (!["image/jpeg", "image/png", "image/webp"].includes(mime)) return false;
-      const { width, height } = info;
-      if (width && height) {
-        const ratio = height / width;
-        if (ratio < 0.3 || ratio > 2.5) return false; // skip extreme panoramas/tall crops
-        if (width < 600) return false; // skip low-res
-      }
-      return true;
-    })
-    .map((page) => page.imageinfo?.[0]?.thumburl)
-    .filter(Boolean)
-    .slice(0, 8);
+    .filter((page) => isUsableImage(page.imageinfo?.[0]))
+    .map((page) => page.imageinfo?.[0]?.thumburl || page.imageinfo?.[0]?.url)
+    .filter(Boolean);
+}
+
+export async function searchImages(q) {
+  // q is the brand name (e.g. "MCDONALD'S" or "DAIRY QUEEN")
+  // Normalize to title case for Wikipedia lookup
+  const brandName = q.replace(/[^a-zA-Z0-9'& ]/g, " ").trim();
+  const titleCase = brandName.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+
+  const [wikiUrls, commonsUrls] = await Promise.allSettled([
+    fetchWikipediaImages(titleCase),
+    fetchCommonsImages(brandName),
+  ]).then((results) => results.map((r) => (r.status === "fulfilled" ? r.value : [])));
+
+  // Merge, deduplicate, cap at 8
+  const seen = new Set();
+  const merged = [];
+  for (const url of [...wikiUrls, ...commonsUrls]) {
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    merged.push(url);
+    if (merged.length >= 8) break;
+  }
+  return merged;
 }

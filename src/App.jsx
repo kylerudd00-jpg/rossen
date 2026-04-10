@@ -362,10 +362,8 @@ function formatHeadlineText(title, brand) {
 }
 
 function imageQueryFor(brand) {
-  const restaurants = new Set(["SUBWAY", "MCDONALD'S", "TACO BELL", "WENDY'S", "CHURCH'S", "POTBELLY"]);
-  const type = restaurants.has(brand) ? "restaurant exterior" : "store exterior";
-  const name = brand.toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim();
-  return `${name} ${type}`;
+  // Pass the brand name directly — searchImages handles Wikipedia + Commons lookup
+  return brand;
 }
 
 // ─── localStorage seen-ID cache ───────────────────────────────────────────────
