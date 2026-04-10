@@ -217,6 +217,29 @@ const SKIP_PATTERNS = [
   /\bbudget(ing)?\s+(tips?|advice|guide|hack)\b/i,
 ];
 
+// Niche single-product categories that aren't broadly relevant to a mass audience
+const NICHE_PRODUCT_PATTERNS = [
+  /\b(caddy|organizer|holder|phone case|stand|bracket|mount|clip|hook|rack|bin|tray|basket)\b/i,
+  /\b(rug|curtain|lamp|light bulb|extension cord|cable|adapter|charger|battery pack)\b/i,
+  /\b(toothbrush|razor|shampoo|conditioner|lotion|deodorant|vitamins?|supplement)\b/i,
+  /\b(luggage|suitcase|duffel|backpack|wallet|purse|handbag)\b/i,
+  /\b(air fryer|blender|toaster|coffee maker|vacuum|mop|broom|trash can)\b/i,
+  /\b(mattress|pillow|comforter|bedsheet|towel|shower curtain)\b/i,
+];
+
+// Brands where mass-audience deals happen — broad chains everyone visits
+const MASS_AUDIENCE_BRANDS = new Set([
+  "MCDONALD'S","TACO BELL","WENDY'S","BURGER KING","CHICK-FIL-A","SUBWAY","DOMINO'S",
+  "PIZZA HUT","PAPA JOHN'S","LITTLE CAESARS","POPEYES","CHIPOTLE","PANERA","STARBUCKS",
+  "DUNKIN'","SONIC","DAIRY QUEEN","APPLEBEE'S","IHOP","DENNY'S","CRACKER BARREL",
+  "BUFFALO WILD WINGS","WINGSTOP","RAISING CANE'S","JERSEY MIKE'S","FIVE GUYS",
+  "SHAKE SHACK","PANDA EXPRESS","QDOBA","JACK IN THE BOX","WHATABURGER","CHURCH'S",
+  "WALMART","TARGET","COSTCO","SAM'S CLUB","KROGER","ALDI","TRADER JOE'S","PUBLIX",
+  "WHOLE FOODS","CVS","WALGREENS","DOLLAR TREE","DOLLAR GENERAL","BEST BUY",
+  "HOME DEPOT","LOWE'S","MACY'S","KOHL'S","NORDSTROM","TJ MAXX","MARSHALLS",
+  "FIVE BELOW","BIG LOTS","BATH & BODY WORKS","ULTA","SEPHORA",
+]);
+
 function scoreCandidate(c) {
   const text = `${c.title} ${c.rawSummary}`.toLowerCase();
   const title = c.title.toLowerCase();
@@ -224,15 +247,31 @@ function scoreCandidate(c) {
   if (SKIP_PATTERNS.some((p) => p.test(text))) return -999;
   if (c.brand === "RETAIL") return -999;
 
+  // Kill niche single-product deals immediately — not relevant for a mass audience
+  if (NICHE_PRODUCT_PATTERNS.some((p) => p.test(text))) return -999;
+
   let score = 0;
 
+  // ── Tier 1: high-value, universally relevant events (+8 to +12) ──────────────
   if (/\bbogo\b|\bbuy one[,\s]+get one\b/i.test(text)) score += 12;
   if (/\brecall\b/i.test(text) && /\bfda\b|\bfsis\b|\bcpsc\b|\bfood\b|\bproduct\b|\bsafety\b/i.test(text)) score += 12;
   if (/\bfree\b.{0,30}\b(cup|scoop|cone|slice|sandwich|meal|entree|item|drink|coffee|taco|burger|chicken|pizza|fries|donut|bagel|cookie|sample)\b/i.test(text)) score += 10;
   if (/\bclosing\b|\bshutting down\b|\bbankruptcy\b|\bgoing out of business\b/i.test(text)) score += 10;
-  if (/\bgrand opening\b|\bmaking a comeback\b|\bcoming back\b|\breturning to stores\b/i.test(text)) score += 8;
+  if (/\bgrand opening\b/i.test(text)) score += 8;
+
+  // "Coming back" only counts if a specific PRODUCT/ITEM is returning — not just a brand
+  // Good: "McRib is coming back", "Pumpkin Spice Latte returns"
+  // Bad: "Dairy Queen is coming back" (too vague — a location reopening, not a deal)
+  if (/\bcoming back\b|\breturns?\b|\breturning\b|\bmaking a comeback\b/i.test(text)) {
+    if (/\b(sandwich|burger|taco|pizza|wrap|bowl|salad|shake|drink|latte|frap|menu item|flavor|treat|dessert|fries|nuggets|chicken|steak|dish|recipe|product)\b/i.test(text)) {
+      score += 8; // specific item returning — great content
+    }
+    // No bonus for vague brand comebacks
+  }
+
   if (/\$\d+(?:\.\d{2})?\s+(?:for\s+)?(?:a\s+)?(?:free\s+)?\w/i.test(text) && /\b(meal|sandwich|piece|cup|item|entree|order|box)\b/i.test(text)) score += 8;
 
+  // ── Tier 2: solid broadly-relevant deals (+4 to +6) ──────────────────────────
   const pctMatch = text.match(/(\d+)\s*%\s*off/i);
   if (pctMatch && parseInt(pctMatch[1]) >= 30) score += 6;
   if (/(\d[\d,]+)\s+(items?|products?|styles?)/i.test(text) && /\b(cut|lower|reduc|cheaper|off|drop)\b/i.test(text)) score += 6;
@@ -241,10 +280,17 @@ function scoreCandidate(c) {
   if (/\$[\d]+/i.test(text)) score += 4;
   if (/\b(through|until|thru|ends?|only on|today only|tonight only)\s+\w/i.test(text)) score += 4;
 
+  // Boost deals from chains everyone goes to — a McDonald's deal is relevant to everyone
+  if (MASS_AUDIENCE_BRANDS.has(c.brand)) score += 3;
+
+  // ── Penalties ────────────────────────────────────────────────────────────────
   if (!/\$[\d]|\d+\s*%|bogo|buy one|free\s+\w|recall|opening|closing|comeback/i.test(text)) score -= 4;
   if (/\bsurvey\b|\bin the app\b/i.test(text) && !/\bfree\b|\$[\d]|\bget\s+\w/i.test(text)) score -= 3;
   if (/\bcoupon\b|\bdiscount\b|\bsavings\b/i.test(text) && !/\$[\d]|\d+\s*%|bogo|free\s+\w/i.test(text)) score -= 3;
   if (title.split(" ").length < 5) score -= 3;
+
+  // Amazon deals are only worth showing if they're a major event — not a random product discount
+  if (c.brand === "AMAZON" && !/\bprime\s+(day|deal|sale)\b|\bgift\s+card\b|\bwhole\s+foods\b|\bsitewide\b/i.test(text)) score -= 6;
 
   return score;
 }
