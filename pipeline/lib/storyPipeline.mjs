@@ -198,107 +198,20 @@ async function fetchGoogleNews(maxPerQuery = 3) {
   return allItems;
 }
 
-// ─── Scoring & filtering ──────────────────────────────────────────────────────
+// ─── Pre-filter (hard kills only — AI handles relevance judgment) ─────────────
 
-const SKIP_PATTERNS = [
+// Only cut things that are definitively off-topic — no deal on earth makes these relevant
+const HARD_SKIP = [
   /\binvestor\b|\bstock\b|\bearnings\b|\bshares\b|\bipo\b|\bwall\s+street\b/i,
   /\belection\b|\bcongress\b|\bsupreme\s+court\b|\bpolitics?\b|\bsenate\b|\bhouse\s+bill\b/i,
-  /\bnfl\b|\bnba\b|\bnhl\b|\bmlb\b|\bnascar\b|\bsports?\s+team\b/i,
-  /\bhoroscope\b|\bastrology\b|\bpsychic\b/i,
+  /\bnfl\b|\bnba\b|\bnhl\b|\bmlb\b|\bnascar\b/i,
   /\breal\s+estate\b|\bmortgage\b|\bforeclosure\b/i,
   /\bcryptocurrency\b|\bcrypto\b|\bbitcoin\b|\bnft\b/i,
   /\bwar\b|\bmilitary\b|\bterror\b|\battack\b/i,
-  /\bdigital coupons?\b/i,
-  /\bweekly ad\b|\bweekly deals?\b|\bweekly savings?\b/i,
-  /\bearn points?\b|\bearn rewards?\b|\bjoin.*rewards\b|\brewards program\b/i,
   /\bhow to (save|shop|get|find|use)\b/i,
   /\btips? (for|to|on)\b|\bbest ways? to\b|\bguide to\b/i,
-  /\bprice match\b|\bprice matching\b/i,
   /\bbudget(ing)?\s+(tips?|advice|guide|hack)\b/i,
 ];
-
-// Niche single-product categories that aren't broadly relevant to a mass audience
-const NICHE_PRODUCT_PATTERNS = [
-  /\b(caddy|organizer|holder|phone case|stand|bracket|mount|clip|hook|rack|bin|tray|basket)\b/i,
-  /\b(rug|curtain|lamp|light bulb|extension cord|cable|adapter|charger|battery pack)\b/i,
-  /\b(toothbrush|razor|shampoo|conditioner|lotion|deodorant|vitamins?|supplement)\b/i,
-  /\b(luggage|suitcase|duffel|backpack|wallet|purse|handbag)\b/i,
-  /\b(air fryer|blender|toaster|coffee maker|vacuum|mop|broom|trash can)\b/i,
-  /\b(mattress|pillow|comforter|bedsheet|towel|shower curtain)\b/i,
-];
-
-// Brands where mass-audience deals happen — broad chains everyone visits
-const MASS_AUDIENCE_BRANDS = new Set([
-  "MCDONALD'S","TACO BELL","WENDY'S","BURGER KING","CHICK-FIL-A","SUBWAY","DOMINO'S",
-  "PIZZA HUT","PAPA JOHN'S","LITTLE CAESARS","POPEYES","CHIPOTLE","PANERA","STARBUCKS",
-  "DUNKIN'","SONIC","DAIRY QUEEN","APPLEBEE'S","IHOP","DENNY'S","CRACKER BARREL",
-  "BUFFALO WILD WINGS","WINGSTOP","RAISING CANE'S","JERSEY MIKE'S","FIVE GUYS",
-  "SHAKE SHACK","PANDA EXPRESS","QDOBA","JACK IN THE BOX","WHATABURGER","CHURCH'S",
-  "WALMART","TARGET","COSTCO","SAM'S CLUB","KROGER","ALDI","TRADER JOE'S","PUBLIX",
-  "WHOLE FOODS","CVS","WALGREENS","DOLLAR TREE","DOLLAR GENERAL","BEST BUY",
-  "HOME DEPOT","LOWE'S","MACY'S","KOHL'S","NORDSTROM","TJ MAXX","MARSHALLS",
-  "FIVE BELOW","BIG LOTS","BATH & BODY WORKS","ULTA","SEPHORA",
-]);
-
-function scoreCandidate(c) {
-  const text = `${c.title} ${c.rawSummary}`.toLowerCase();
-  const title = c.title.toLowerCase();
-
-  if (SKIP_PATTERNS.some((p) => p.test(text))) return -999;
-  if (c.brand === "RETAIL") return -999;
-
-  // Kill niche single-product deals immediately — not relevant for a mass audience
-  if (NICHE_PRODUCT_PATTERNS.some((p) => p.test(text))) return -999;
-
-  let score = 0;
-
-  // ── Tier 1: high-value, universally relevant events (+8 to +12) ──────────────
-  if (/\bbogo\b|\bbuy one[,\s]+get one\b/i.test(text)) score += 12;
-  if (/\brecall\b/i.test(text) && /\bfda\b|\bfsis\b|\bcpsc\b|\bfood\b|\bproduct\b|\bsafety\b/i.test(text)) score += 12;
-  // Expanded free food list — covers all the item types users post about
-  if (/\bfree\b.{0,30}\b(cup|scoop|cone|slice|sandwich|meal|entree|item|drink|coffee|latte|taco|burger|chicken|pizza|fries|donut|bagel|cookie|sample|frosty|blizzard|flurry|shake|sundae|treat|nuggets|wing|bite|pretzel|croissant|muffin)\b/i.test(text)) score += 10;
-  if (/\bclosing\b|\bshutting down\b|\bbankruptcy\b|\bgoing out of business\b/i.test(text)) score += 10;
-  if (/\bgrand opening\b/i.test(text)) score += 8;
-
-  // "Coming back" only counts if a specific PRODUCT/ITEM is returning, not just a brand
-  if (/\bcoming back\b|\breturns?\b|\breturning\b|\bmaking a comeback\b/i.test(text)) {
-    if (/\b(sandwich|burger|taco|pizza|wrap|bowl|salad|shake|frosty|blizzard|drink|latte|frap|menu item|flavor|treat|dessert|fries|nuggets|chicken|steak|dish|recipe|product)\b/i.test(text)) {
-      score += 8;
-    }
-  }
-
-  // Specific price + food item deal (e.g. "67¢ burgers", "$3 meal")
-  if (/\$\d+(?:\.\d{2})?\s+(?:for\s+)?(?:a\s+)?(?:free\s+)?\w/i.test(text) && /\b(meal|sandwich|piece|cup|item|entree|order|box|burger|taco|pizza|chicken|fries)\b/i.test(text)) score += 10;
-  // Cent-priced deals — "67 cents", "67¢", "$0.67" (e.g. McDonald's 67¢ burger)
-  if (/\d+\s*(?:cents?|¢)|\$0\.\d{2}\b/i.test(text)) score += 10;
-  // Bundle / keychain deals (e.g. "$3 keychain = free Frosty for a year")
-  if (/\bkeychain\b|\bfor\s+a\s+year\b|\bannual\s+pass\b/i.test(text) && /\bfree\b|\bdeal\b|\boffer\b/i.test(text)) score += 10;
-
-  // ── Tier 2: solid broadly-relevant deals (+4 to +6) ──────────────────────────
-  const pctMatch = text.match(/(\d+)\s*%\s*off/i);
-  if (pctMatch && parseInt(pctMatch[1]) >= 30) score += 6;
-  if (/(\d[\d,]+)\s+(items?|products?|styles?)/i.test(text) && /\b(cut|lower|reduc|cheaper|off|drop)\b/i.test(text)) score += 6;
-  if (/\bnew\b.{0,20}\b(menu|item|sandwich|burger|taco|pizza|drink|meal|flavor)\b/i.test(text)) score += 5;
-  if (/\btrade.?in\b/i.test(text) && /\bgift\s+card\b/i.test(text)) score += 5;
-  if (/\$[\d]+/i.test(text)) score += 4;
-  // Time pressure — specific date or deadline mentioned
-  if (/\b(through|until|thru|ends?)\s+(april|may|june|july|august|september|october|november|december|january|february|march|\d)/i.test(text)) score += 5;
-  if (/\b(today only|tonight only|this weekend|one day only|limited time)\b/i.test(text)) score += 4;
-
-  // Boost deals from chains everyone goes to
-  if (MASS_AUDIENCE_BRANDS.has(c.brand)) score += 3;
-
-  // ── Penalties ────────────────────────────────────────────────────────────────
-  if (!/\$[\d]|\d+\s*%|bogo|buy one|free\s+\w|recall|opening|closing|comeback/i.test(text)) score -= 4;
-  if (/\bsurvey\b|\bin the app\b/i.test(text) && !/\bfree\b|\$[\d]|\bget\s+\w/i.test(text)) score -= 3;
-  if (/\bcoupon\b|\bdiscount\b|\bsavings\b/i.test(text) && !/\$[\d]|\d+\s*%|bogo|free\s+\w/i.test(text)) score -= 3;
-  if (title.split(" ").length < 5) score -= 3;
-
-  // Amazon deals are only worth showing if they're a major event — not a random product discount
-  if (c.brand === "AMAZON" && !/\bprime\s+(day|deal|sale)\b|\bgift\s+card\b|\bwhole\s+foods\b|\bsitewide\b/i.test(text)) score -= 6;
-
-  return score;
-}
 
 function titleFingerprint(title) {
   return title
@@ -310,23 +223,27 @@ function titleFingerprint(title) {
     .join(" ");
 }
 
-function filterAndRank(candidates) {
+function preFilter(candidates) {
   const seenUrls = new Set();
   const seenFingerprints = new Set();
 
-  return candidates
-    .filter((c) => {
-      if (seenUrls.has(c.sourceUrl)) return false;
-      seenUrls.add(c.sourceUrl);
-      const fp = titleFingerprint(c.title);
-      if (seenFingerprints.has(fp)) return false;
-      seenFingerprints.add(fp);
-      return true;
-    })
-    .map((c) => ({ ...c, _score: scoreCandidate(c) }))
-    .filter((c) => c._score >= 8)
-    .sort((a, b) => b._score - a._score)
-    .slice(0, 20);
+  return candidates.filter((c) => {
+    const text = `${c.title} ${c.rawSummary}`.toLowerCase();
+
+    // Hard kill — definitively off-topic
+    if (HARD_SKIP.some((p) => p.test(text))) return false;
+    // Must be a recognized brand
+    if (c.brand === "RETAIL") return false;
+    // URL dedup
+    if (seenUrls.has(c.sourceUrl)) return false;
+    seenUrls.add(c.sourceUrl);
+    // Title similarity dedup
+    const fp = titleFingerprint(c.title);
+    if (seenFingerprints.has(fp)) return false;
+    seenFingerprints.add(fp);
+
+    return true;
+  }).slice(0, 60); // send up to 60 candidates to AI — it decides what's actually worth posting
 }
 
 // ─── All sources ──────────────────────────────────────────────────────────────
@@ -381,102 +298,126 @@ async function fetchAllSources() {
 
 // ─── AI headline rewriter ─────────────────────────────────────────────────────
 
-const HEADLINE_PROMPT = `You write poster headlines for Instagram deal posts. Think billboard, not sentence.
+const HEADLINE_PROMPT = `You are the content curator and headline writer for a major Instagram deal page with 500k+ followers.
 
-You are given articles about consumer deals, freebies, recalls, and retail news. Your job is to turn each one into a 3-line poster headline. The text will appear in huge bold type on a graphic. It must read instantly.
+You will receive a list of articles. For each one you must:
+1. Decide if it is worth posting to a mass-audience deal page
+2. If yes, write a 3-line poster headline
 
-OUTPUT FORMAT — 3 lines, ALL CAPS:
-line1: BRAND NAME
-line2: THE MAIN PAYOFF (what you get, what happened, what's free — 3-5 words)
-line3: DATE / PRICE / HOW TO GET IT (3-4 words — use "" if nothing concrete)
+─── RELEVANCE JUDGMENT ───────────────────────────────────────────────────────
 
-THE CARDINAL RULE:
-Write like a poster. Not like a sentence. Not like ad copy. Not like a news headline.
+POST IT if it is a specific, actionable deal that everyday shoppers care about:
+✓ BOGO at a major chain — "Buy one Whopper, get one free through Sunday"
+✓ Free specific item — "Free cone day at Ben & Jerry's, April 14"
+✓ Unusually low price — "McDonald's burgers 67¢ on Wednesdays"
+✓ Real dollar savings on something popular — "Vitamix $100 off at Costco"
+✓ Bundle deal with clear value — "$3 keychain = free Frosty every visit for a year"
+✓ Time-limited offer with a date — "BOGO K-Shack at Shake Shack through April 22"
+✓ Recall consumers need to act on
+✓ Major brand closing / bankruptcy
+✓ Annual freebie event (Free Cone Day, Tax Day deals, National food days)
+✓ Significant % off at a store everyone shops at (30%+ on popular categories)
 
-WRONG (sentence thinking):
-"Subway is offering a buy one get one deal on footlongs through April 28"
-"Customers can get a free entree by taking a survey in the app"
-"Target has reduced prices on over 3,000 items this spring"
+SKIP IT if it is vague, niche, or not actionable:
+✗ "Brand is having a sale" — no specific item, price, or date
+✗ Random product discounts — $5 off a shoe, 20% off a lamp, single SKU deals
+✗ Generic brand news with no consumer deal
+✗ "Brand is coming back" — unless a specific product or deal is named
+✗ How-to / tips / listicle content
+✗ Deals only relevant to a tiny niche audience
 
-RIGHT (poster thinking):
-SUBWAY / BOGO FOOTLONGS / THROUGH APRIL 28
-QDOBA / FREE ENTREE / TAKE THE SURVEY
-TARGET / 3,000 ITEMS / NOW CHEAPER
+─── HEADLINE FORMAT (for approved items only) ────────────────────────────────
 
-MORE RIGHT EXAMPLES:
-CHURCH'S / 8-PIECE CHICKEN / JUST $4.99
-MCDONALD'S / $4 BREAKFAST DEAL / STARTS APRIL 21
-KONA ICE / FREE SHAVED ICE / TAX DAY ONLY
-AMAZON / TRADE IN OLD TECH / GET GIFT CARDS
-SAM'S CLUB / SAVINGS END / APRIL 12
-STARBUCKS / BUY ONE GET ONE / AFTER 3PM
-DUNKIN' / FREE MEDIUM DRINK / WITH ANY PURCHASE
-POTBELLY / BUY ONE SANDWICH / GET ONE FREE
-WENDY'S / $4 $6 $8 DEALS / BIGGIE MEALS
-TRADER JOE'S / RECALL / ALERT
-COSTCO / $100 OFF / THIS WEEK ONLY
+Think billboard. Not a sentence. Not ad copy. Reads in 1 second.
+
+Line 1: BRAND NAME
+Line 2: THE DEAL — what you get, what happened (3–5 words, specific)
+Line 3: KEY DETAIL — price / date / how to get it (3–4 words)
+
+WRONG: "McDonald's is offering burgers at a discounted price on certain days"
+RIGHT:
+MCDONALD'S
+BURGERS 67¢
+EVERY WEDNESDAY
+
+MORE EXAMPLES:
+WENDY'S / FREE FROSTY FOR A YEAR / $3 KEYCHAIN
+BEN & JERRY'S / FREE CONE DAY / APRIL 14TH
+SHAKE SHACK / BOGO K-SHACK / THROUGH APRIL 22
+COSTCO / VITAMIX $100 OFF / THIS WEEK ONLY
+TACO BELL / FREE TACO / TAKE THE SURVEY
+STARBUCKS / BOGO DRINKS / AFTER 3PM TODAY
+CHICK-FIL-A / FREE SANDWICH / APP ONLY
 
 RULES:
-- ALL CAPS on every line, always
-- Max 5-6 words per line — shorter is better
-- Extract the real deal from the title/summary: item name, price, date, percentage, requirement
-- Never use filler: "BIG SAVINGS" "GREAT DEAL" "HOT DEAL" "DON'T MISS" "SPECIAL OFFER" "AMAZING" "CHECK IT OUT"
+- ALL CAPS always
+- Max 5–6 words per line — shorter is better
+- Only use details from the title/summary — never invent prices or dates
+- No filler: "BIG SAVINGS" "GREAT DEAL" "DON'T MISS" "AMAZING" "HOT DEAL"
 - Never write a full sentence
-- If the deal needs the app → line3 = "IN THE APP"
-- If there's a survey → line3 = "TAKE THE SURVEY"
-- If free with purchase → line3 = "WITH ANY PURCHASE"
-- Never invent details. Only use what's in the title and summary.
 
-Return ONLY a JSON array: [{ "id": "...", "line1": "...", "line2": "...", "line3": "..." }]
-No markdown. No explanation. Just the JSON.`;
+─── OUTPUT ───────────────────────────────────────────────────────────────────
 
-async function rewriteHeadlines(candidates, apiKey) {
+Return ONLY a JSON array. Every input item must appear in the output.
+{ "id": "...", "relevant": true, "line1": "...", "line2": "...", "line3": "..." }
+{ "id": "...", "relevant": false }
+
+No markdown. No explanation. Just the JSON array.`;
+
+async function filterAndRewriteWithAI(candidates, apiKey) {
   const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.3,
-      max_tokens: 4096,
+      temperature: 0.2,
+      max_tokens: 6000,
       messages: [
         { role: "system", content: HEADLINE_PROMPT },
         { role: "user", content: JSON.stringify(payload) },
       ],
     }),
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(60000),
   });
   if (!response.ok) throw new Error(`Groq ${response.status}`);
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content || "";
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) throw new Error("No JSON in Groq response");
-  const rewrites = JSON.parse(match[0]);
-  return candidates.map((c) => {
-    const r = rewrites.find((item) => item.id === c.id);
-    if (!r) return c;
-    return { ...c, headline: [r.line1, r.line2, r.line3].filter(Boolean).join("\n") };
-  });
+  const results = JSON.parse(match[0]);
+
+  // Only return items the AI marked as relevant, with their rewritten headlines
+  return candidates
+    .map((c) => {
+      const r = results.find((item) => item.id === c.id);
+      if (!r?.relevant) return null;
+      return { ...c, headline: [r.line1, r.line2, r.line3].filter(Boolean).join("\n") };
+    })
+    .filter(Boolean);
 }
 
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
 export async function fetchStories() {
   const all = await fetchAllSources();
-  const filtered = filterAndRank(all);
-  console.log(`[pipeline] ${all.length} raw → ${filtered.length} after scoring`);
+  const candidates = preFilter(all);
+  console.log(`[pipeline] ${all.length} raw → ${candidates.length} after pre-filter`);
 
   const apiKey = process.env.GROQ_API_KEY;
   if (apiKey) {
     try {
-      console.log(`[pipeline] Rewriting ${filtered.length} headlines with Groq…`);
-      return await rewriteHeadlines(filtered, apiKey);
+      console.log(`[pipeline] Sending ${candidates.length} candidates to AI for relevance + rewrite…`);
+      const results = await filterAndRewriteWithAI(candidates, apiKey);
+      console.log(`[pipeline] AI approved ${results.length} stories`);
+      return results;
     } catch (e) {
-      console.warn("[pipeline] Groq rewrite failed:", e.message);
+      console.warn("[pipeline] AI filter failed, returning pre-filtered candidates:", e.message);
     }
   }
 
-  return filtered;
+  // Fallback if no API key — return pre-filtered candidates without headlines
+  return candidates.slice(0, 20);
 }
 
 // ─── Image search ─────────────────────────────────────────────────────────────
