@@ -377,97 +377,91 @@ async function filterRelevance(candidates, apiKey) {
   return JSON.parse(match[0]);
 }
 
-// ─── Pass 2: headline writer (one story at a time) ────────────────────────────
+// ─── Pass 2: fact extractor — AI extracts raw facts, code formats them ────────
 
-const HEADLINE_PROMPT = `You write captions for an Instagram deal page. Each caption goes on a static slide and must be understood in one glance.
+const EXTRACT_PROMPT = `You are a fact extractor for a deal alert page.
 
-─── STRUCTURE ────────────────────────────────────────────────────────────────
+Given an article about a consumer deal, extract two plain-English phrases:
+- "offer": the deal in plain words, 3–7 words, no punctuation, no caps
+- "detail": the most important supporting detail in 2–5 words — a price, date, condition, or how to get it. No punctuation, no caps.
 
-Every caption follows this order:
-  Line 1: BRAND
-  Line 2: THE DEAL or NEWS
-  Line 3: DATE / PRICE / HOW TO GET IT
+Only use facts that appear in the article. If a detail is not mentioned, return an empty string for it.
 
-─── THE MOST IMPORTANT RULE: BE LOGICAL ──────────────────────────────────────
+Examples:
+Article: "Subway is running a buy one get one free deal on footlongs through Sunday"
+→ {"offer": "buy one footlong get one free", "detail": "through sunday"}
 
-The words must read naturally from top to bottom. Each line must make sense:
-  - by itself
-  - with the line above it
-  - with the line below it
+Article: "Church's Chicken is selling an 8-piece meal for $4.99"
+→ {"offer": "8 piece chicken meal", "detail": "just 4.99"}
 
-Line breaks must group words that belong together. Never split a thought
-in the wrong place. The reader should instantly understand: who, what, why now.
+Article: "Ben & Jerry's is holding Free Cone Day on April 14 at participating locations"
+→ {"offer": "free cone day", "detail": "april 14"}
 
-─── CORRECT EXAMPLES ─────────────────────────────────────────────────────────
+Article: "Wendy's is offering a Jr. Frosty every visit for a year with a $3 key tag purchase"
+→ {"offer": "jr frosty for a year", "detail": "3 dollar key tag"}
 
-SUBWAY
-BUY ONE FOOTLONG
-GET ONE FREE
+Article: "Costco has the Vitamix blender for $100 off this week"
+→ {"offer": "vitamix 100 dollars off", "detail": "this week only"}
 
-CHURCH'S
-8-PIECE CHICKEN
-JUST $4.99
+Article: "Dunkin is giving away a free medium coffee with any purchase on Monday"
+→ {"offer": "free medium coffee", "detail": "any purchase monday"}
 
-WENDY'S
-JR. FROSTY FOR A YEAR
-$3 KEY TAG
+Return ONLY valid JSON, no other text: {"offer":"...","detail":"..."}`;
 
-BEN & JERRY'S
-FREE CONE DAY
-APRIL 14
+// Format the AI-extracted facts into a clean 3-line headline
+function formatHeadlineFromFacts(brand, offer, detail) {
+  const up = (s) => s.toUpperCase().trim();
 
-COSTCO
-VITAMIX $100 OFF
-THIS WEEK ONLY
+  // Clean up common spoken-English artifacts from the AI output
+  const cleanOffer = offer
+    .replace(/\b(\d+)\s+dollars?\b/gi, "$$1")
+    .replace(/\bjust\s+(\d)/gi, "$$1")
+    .trim();
+  const cleanDetail = detail
+    .replace(/\b(\d+)\s+dollars?\b/gi, "$$1")
+    .replace(/\bjust\s+(\d)/gi, "$$1")
+    .trim();
 
-SAM'S CLUB
-SAVINGS END
-APRIL 12
+  const offerUp = up(cleanOffer);
+  const detailUp = up(cleanDetail);
 
-AMAZON
-GET GIFT CARDS
-FOR OLD TECH
+  // Try to split a long offer line at a natural break point
+  // so it reads as two clean lines instead of one crowded line
+  const SPLIT_AT = ["GET ONE FREE", "GET ONE", "FOR A YEAR", "FOR FREE", "FOR LIFE", "OR FREE", "AND GET", "PLUS FREE"];
+  let line2 = offerUp;
+  let line3 = detailUp || null;
 
-POTBELLY
-BUY ONE SANDWICH
-GET ONE FREE
+  if (offerUp.length > 22) {
+    for (const pivot of SPLIT_AT) {
+      const idx = offerUp.indexOf(pivot);
+      if (idx > 0) {
+        // Put what comes before the pivot on line2, the pivot itself starts line3
+        const before = offerUp.slice(0, idx).trim();
+        const after = offerUp.slice(idx).trim();
+        if (before && after) {
+          line2 = before;
+          line3 = detailUp ? `${after}\n${detailUp}` : after;
+          break;
+        }
+      }
+    }
+  }
 
-─── WRONG EXAMPLES (do not do this) ─────────────────────────────────────────
-
-WENDY'S            ← BAD: splits "JR. FROSTY FOR A YEAR" across lines
-JR. FROSTY
-FOR A YEAR $3 KEY TAG
-
-BUY ONE            ← BAD: splits "BUY ONE FOOTLONG" across lines
-FOOTLONG GET
-ONE FREE
-
-─── RULES ────────────────────────────────────────────────────────────────────
-
-- ALL CAPS always
-- Short, direct, logical — reads like a stacked sign or consumer alert
-- Each line is a complete thought or natural phrase chunk
-- Only use facts from the article — never invent prices, dates, or details
-- No filler: "BIG SAVINGS", "GREAT DEAL", "DON'T MISS", "AMAZING OFFER"
-- No full sentences — compressed headline style only
-- The strongest information comes first
-
-─── OUTPUT ───────────────────────────────────────────────────────────────────
-
-Return ONLY a JSON object, no other text:
-{"line1":"...","line2":"...","line3":"..."}`;
+  const lines = [up(brand), line2, line3].filter(Boolean);
+  return lines.join("\n");
+}
 
 async function writeHeadline(candidate, apiKey) {
-  const article = `Brand: ${candidate.brand}\nTitle: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
+  const article = `Title: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.1,
+      temperature: 0,
       max_tokens: 32768,
       messages: [
-        { role: "system", content: HEADLINE_PROMPT },
+        { role: "system", content: EXTRACT_PROMPT },
         { role: "user", content: article },
       ],
     }),
@@ -476,12 +470,11 @@ async function writeHeadline(candidate, apiKey) {
   if (!res.ok) throw new Error(`Groq headline ${res.status}`);
   const data = await res.json();
   const text = data.choices?.[0]?.message?.content || "";
-  const match = text.match(/\{[\s\S]*\}/);
+  const match = text.match(/\{[\s\S]*?\}/);
   if (!match) throw new Error("No JSON in headline response");
-  const { line1, line2, line3 } = JSON.parse(match[0]);
-  const lines = [line1, line2, line3].filter(Boolean);
-  if (lines.length === 0) throw new Error("Empty headline");
-  return lines.join("\n");
+  const { offer, detail } = JSON.parse(match[0]);
+  if (!offer) throw new Error("Empty offer in headline response");
+  return formatHeadlineFromFacts(candidate.brand, offer, detail || "");
 }
 
 async function filterAndRewriteWithAI(candidates, apiKey) {
