@@ -371,16 +371,24 @@ function imageQueryFor(brand) {
 // ─── localStorage seen-ID cache ───────────────────────────────────────────────
 
 const SEEN_KEY = "dp-seen-ids";
+const SEEN_TTL = 24 * 60 * 60 * 1000; // 24 hours — stories expire and can resurface
 
 function loadSeenIds() {
-  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]")); }
-  catch { return new Set(); }
+  try {
+    const entries = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
+    const now = Date.now();
+    return new Set(entries.filter((e) => now - e.ts < SEEN_TTL).map((e) => e.id));
+  } catch { return new Set(); }
 }
 
 function addSeenId(id) {
   try {
-    const existing = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
-    const updated = [...new Set([...existing, id])].slice(-500);
+    const entries = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
+    const now = Date.now();
+    const updated = entries
+      .filter((e) => now - e.ts < SEEN_TTL && e.id !== id)
+      .concat({ id, ts: now })
+      .slice(-500);
     localStorage.setItem(SEEN_KEY, JSON.stringify(updated));
   } catch {}
 }
@@ -859,19 +867,21 @@ export default function App() {
       }
 
       const usedIds = new Set([...held.map((h) => h.storyId), ...posts.map((p) => p.storyId)]);
-      const seenIds = loadSeenIds(); // includes the IDs we just added
+      const seenIds = loadSeenIds();
       const fresh = await apiFetchStories();
-      const available = fresh.filter((h) => !usedIds.has(h.storyId) && !seenIds.has(h.storyId));
+
+      // Filter out used + recently seen stories
+      let available = fresh.filter((h) => !usedIds.has(h.storyId) && !seenIds.has(h.storyId));
+
+      // Fallback: if the seen list has exhausted the feed pool, ignore seen IDs
+      // so you always have something to review
+      if (available.length < 3) {
+        available = fresh.filter((h) => !usedIds.has(h.storyId));
+      }
+
       setAllFetched(available);
       const needed = Math.max(0, 8 - held.length);
-      const nextHeadlines = [...held, ...available.slice(0, needed)];
-      setHeadlines(nextHeadlines);
-
-      // Mark the new batch as seen immediately — so a browser page refresh
-      // won't reset state and show the same stories again
-      for (const h of nextHeadlines) {
-        if (h.status !== "held") addSeenId(h.storyId);
-      }
+      setHeadlines([...held, ...available.slice(0, needed)]);
     } catch {
       setStoriesError("Could not load stories — make sure the dev server is running.");
     } finally {
