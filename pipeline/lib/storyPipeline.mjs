@@ -255,21 +255,24 @@ function scoreCandidate(c) {
   // ── Tier 1: high-value, universally relevant events (+8 to +12) ──────────────
   if (/\bbogo\b|\bbuy one[,\s]+get one\b/i.test(text)) score += 12;
   if (/\brecall\b/i.test(text) && /\bfda\b|\bfsis\b|\bcpsc\b|\bfood\b|\bproduct\b|\bsafety\b/i.test(text)) score += 12;
-  if (/\bfree\b.{0,30}\b(cup|scoop|cone|slice|sandwich|meal|entree|item|drink|coffee|taco|burger|chicken|pizza|fries|donut|bagel|cookie|sample)\b/i.test(text)) score += 10;
+  // Expanded free food list — covers all the item types users post about
+  if (/\bfree\b.{0,30}\b(cup|scoop|cone|slice|sandwich|meal|entree|item|drink|coffee|latte|taco|burger|chicken|pizza|fries|donut|bagel|cookie|sample|frosty|blizzard|flurry|shake|sundae|treat|nuggets|wing|bite|pretzel|croissant|muffin)\b/i.test(text)) score += 10;
   if (/\bclosing\b|\bshutting down\b|\bbankruptcy\b|\bgoing out of business\b/i.test(text)) score += 10;
   if (/\bgrand opening\b/i.test(text)) score += 8;
 
-  // "Coming back" only counts if a specific PRODUCT/ITEM is returning — not just a brand
-  // Good: "McRib is coming back", "Pumpkin Spice Latte returns"
-  // Bad: "Dairy Queen is coming back" (too vague — a location reopening, not a deal)
+  // "Coming back" only counts if a specific PRODUCT/ITEM is returning, not just a brand
   if (/\bcoming back\b|\breturns?\b|\breturning\b|\bmaking a comeback\b/i.test(text)) {
-    if (/\b(sandwich|burger|taco|pizza|wrap|bowl|salad|shake|drink|latte|frap|menu item|flavor|treat|dessert|fries|nuggets|chicken|steak|dish|recipe|product)\b/i.test(text)) {
-      score += 8; // specific item returning — great content
+    if (/\b(sandwich|burger|taco|pizza|wrap|bowl|salad|shake|frosty|blizzard|drink|latte|frap|menu item|flavor|treat|dessert|fries|nuggets|chicken|steak|dish|recipe|product)\b/i.test(text)) {
+      score += 8;
     }
-    // No bonus for vague brand comebacks
   }
 
-  if (/\$\d+(?:\.\d{2})?\s+(?:for\s+)?(?:a\s+)?(?:free\s+)?\w/i.test(text) && /\b(meal|sandwich|piece|cup|item|entree|order|box)\b/i.test(text)) score += 8;
+  // Specific price + food item deal (e.g. "67¢ burgers", "$3 meal")
+  if (/\$\d+(?:\.\d{2})?\s+(?:for\s+)?(?:a\s+)?(?:free\s+)?\w/i.test(text) && /\b(meal|sandwich|piece|cup|item|entree|order|box|burger|taco|pizza|chicken|fries)\b/i.test(text)) score += 10;
+  // Cent-priced deals — "67 cents", "67¢", "$0.67" (e.g. McDonald's 67¢ burger)
+  if (/\d+\s*(?:cents?|¢)|\$0\.\d{2}\b/i.test(text)) score += 10;
+  // Bundle / keychain deals (e.g. "$3 keychain = free Frosty for a year")
+  if (/\bkeychain\b|\bfor\s+a\s+year\b|\bannual\s+pass\b/i.test(text) && /\bfree\b|\bdeal\b|\boffer\b/i.test(text)) score += 10;
 
   // ── Tier 2: solid broadly-relevant deals (+4 to +6) ──────────────────────────
   const pctMatch = text.match(/(\d+)\s*%\s*off/i);
@@ -278,9 +281,11 @@ function scoreCandidate(c) {
   if (/\bnew\b.{0,20}\b(menu|item|sandwich|burger|taco|pizza|drink|meal|flavor)\b/i.test(text)) score += 5;
   if (/\btrade.?in\b/i.test(text) && /\bgift\s+card\b/i.test(text)) score += 5;
   if (/\$[\d]+/i.test(text)) score += 4;
-  if (/\b(through|until|thru|ends?|only on|today only|tonight only)\s+\w/i.test(text)) score += 4;
+  // Time pressure — specific date or deadline mentioned
+  if (/\b(through|until|thru|ends?)\s+(april|may|june|july|august|september|october|november|december|january|february|march|\d)/i.test(text)) score += 5;
+  if (/\b(today only|tonight only|this weekend|one day only|limited time)\b/i.test(text)) score += 4;
 
-  // Boost deals from chains everyone goes to — a McDonald's deal is relevant to everyone
+  // Boost deals from chains everyone goes to
   if (MASS_AUDIENCE_BRANDS.has(c.brand)) score += 3;
 
   // ── Penalties ────────────────────────────────────────────────────────────────
@@ -319,7 +324,7 @@ function filterAndRank(candidates) {
       return true;
     })
     .map((c) => ({ ...c, _score: scoreCandidate(c) }))
-    .filter((c) => c._score >= 10)
+    .filter((c) => c._score >= 8)
     .sort((a, b) => b._score - a._score)
     .slice(0, 20);
 }
@@ -366,6 +371,10 @@ async function fetchAllSources() {
     fetchFeed("reddit-free",   "https://www.reddit.com/r/freebies/hot.rss?limit=15",                                      "r/freebies",          12),
     fetchFeed("reddit-coupon", "https://www.reddit.com/r/coupons/hot.rss?limit=10",                                       "r/coupons",            8),
     fetchFeed("reddit-efree",  "https://www.reddit.com/r/eFreebies/hot.rss?limit=10",                                     "r/eFreebies",          8),
+    // ── Fast food & restaurant deal news ──────────────────────────────────────
+    fetchFeed("brand-eating",  "https://www.brandeating.com/feeds/posts/default",                                         "Brand Eating",        12),
+    fetchFeed("chew-boom",     "https://www.chewboom.com/feed/",                                                          "Chew Boom",           12),
+    fetchFeed("fast-food-post","https://www.fastfoodpost.com/feed/",                                                      "Fast Food Post",      10),
   ]);
   return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }
