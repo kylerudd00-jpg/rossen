@@ -667,63 +667,9 @@ function LoadingProgress({ pct, msg }) {
 
 // ─── Password gate ────────────────────────────────────────────────────────────
 
-const AUTH_KEY = "dp-auth";
-const SITE_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
-console.log("[auth] SITE_PASSWORD:", SITE_PASSWORD);
-
-function useAuth() {
-  const [authed, setAuthed] = useState(() => localStorage.getItem(AUTH_KEY) === SITE_PASSWORD);
-
-  function submit(guess) {
-    if (guess === SITE_PASSWORD) {
-      localStorage.setItem(AUTH_KEY, SITE_PASSWORD);
-      setAuthed(true);
-      return true;
-    }
-    return false;
-  }
-
-  return { authed, submit };
-}
-
-function PasswordGate({ onAuth }) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState(false);
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    const ok = onAuth(value);
-    if (!ok) {
-      setError(true);
-      setValue("");
-    }
-  }
-
-  return (
-    <div className="gate-shell">
-      <form className="gate-card" onSubmit={handleSubmit}>
-        <p className="eyebrow">Deal Pipeline</p>
-        <h1 className="gate-title">Enter Password</h1>
-        <input
-          className={`gate-input${error ? " gate-input-error" : ""}`}
-          type="password"
-          placeholder="Password"
-          value={value}
-          autoFocus
-          onChange={(e) => { setValue(e.target.value); setError(false); }}
-        />
-        {error ? <p className="gate-error">Incorrect password.</p> : null}
-        <button type="submit" className="generate-button gate-button">Unlock</button>
-      </form>
-    </div>
-  );
-}
-
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { authed, submit } = useAuth();
-  if (!authed) return <PasswordGate onAuth={submit} />;
   const [headlines, setHeadlines] = useState([]);
   const [allFetched, setAllFetched] = useState([]);
   const [posts, setPosts] = useState([]);
