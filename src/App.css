@@ -566,6 +566,89 @@
   padding: 0 2px;
 }
 
+.product-section-label {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+}
+
+.font-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.font-option {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #0b1220;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.font-option:hover {
+  border-color: rgba(249, 115, 22, 0.5);
+}
+
+.font-option-active {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: #f97316;
+  color: #fb923c;
+}
+
+.logo-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logo-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.logo-pos-btn {
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #0b1220;
+  color: #e2e8f0;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.logo-pos-btn:hover {
+  border-color: rgba(249, 115, 22, 0.5);
+}
+
+.logo-pos-active {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: #f97316;
+}
+
+.logo-size-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-size-slider {
+  flex: 1;
+  accent-color: #f97316;
+  cursor: pointer;
+}
+
 .product-edit-textarea {
   width: 100%;
   margin-top: 8px;

@@ -145,7 +145,7 @@ async function drawLogoLayer(context, story, width, showLogo) {
   drawLogoLabel(context, story, width);
 }
 
-async function downloadStoryImage(story, activeImage, showLogo) {
+async function downloadStoryImage(story, activeImage, showLogo, fontFamily, uploadedLogo) {
   const width = 2160;
   const height = 2700;
   const canvas = document.createElement("canvas");
@@ -178,13 +178,35 @@ async function downloadStoryImage(story, activeImage, showLogo) {
 
   await drawLogoLayer(context, story, width, showLogo);
 
+  // Draw user-uploaded logo if present
+  if (uploadedLogo?.dataUrl) {
+    try {
+      await document.fonts.ready;
+      const logoImg = await loadImage(uploadedLogo.dataUrl);
+      const maxW = width * uploadedLogo.scale;
+      const ratio = Math.min(maxW / logoImg.width, (width * 0.3) / logoImg.height, 1);
+      const lw = logoImg.width * ratio;
+      const lh = logoImg.height * ratio;
+      const pad = 80;
+      const pos = uploadedLogo.position;
+      const lx = pos.includes("left") ? pad : pos.includes("right") ? width - lw - pad : (width - lw) / 2;
+      const ly = pos.includes("bottom") ? height - lh - pad : pad;
+      context.drawImage(logoImg, lx, ly, lw, lh);
+    } catch (e) {
+      console.warn("Uploaded logo export failed:", e.message);
+    }
+  }
+
   const lines = story.text.split("\n").filter(Boolean);
   if (lines.length === 0) throw new Error("There is no headline text to export.");
+
+  const resolvedFont = fontFamily || "Arial Black, Arial, sans-serif";
+  await document.fonts.load(`900 100px "${resolvedFont.split(",")[0].trim()}"`).catch(() => {});
 
   const maxTextWidth = width - 180;
   let fontSize = 210;
   while (fontSize > 110) {
-    context.font = `900 ${fontSize}px Arial Black, Arial, sans-serif`;
+    context.font = `900 ${fontSize}px ${resolvedFont}`;
     const widestLine = Math.max(...lines.map((line) => context.measureText(line).width));
     if (widestLine <= maxTextWidth) break;
     fontSize -= 8;
@@ -205,7 +227,7 @@ async function downloadStoryImage(story, activeImage, showLogo) {
   context.shadowColor = "rgba(0, 0, 0, 0.62)";
   context.shadowBlur = 28;
   context.shadowOffsetY = 8;
-  context.font = `900 ${fontSize}px Arial Black, Arial, sans-serif`;
+  context.font = `900 ${fontSize}px ${resolvedFont}`;
 
   lines.forEach((line, index) => {
     context.fillText(line, width / 2, textTop + index * lineHeight);
@@ -538,7 +560,42 @@ function ImagePicker({ brand, headlineLines, images, selectedIndex, onSelect, on
   );
 }
 
+const FONTS = [
+  { label: "Arial Black", value: "Arial Black, Arial, sans-serif" },
+  { label: "Impact",      value: "Impact, Haettenschweiler, sans-serif" },
+  { label: "Bebas Neue",  value: "'Bebas Neue', sans-serif" },
+  { label: "Anton",       value: "'Anton', sans-serif" },
+  { label: "Oswald",      value: "'Oswald', sans-serif" },
+  { label: "Montserrat",  value: "'Montserrat', sans-serif" },
+  { label: "Barlow",      value: "'Barlow Condensed', sans-serif" },
+];
+
+const LOGO_POSITIONS = [
+  { id: "top-left",      label: "↖" },
+  { id: "top-center",    label: "↑" },
+  { id: "top-right",     label: "↗" },
+  { id: "bottom-left",   label: "↙" },
+  { id: "bottom-center", label: "↓" },
+  { id: "bottom-right",  label: "↘" },
+];
+
+function getUploadedLogoStyle(position, scale) {
+  const pad = "12px";
+  const size = `${Math.round(scale * 100)}%`;
+  const base = { position: "absolute", zIndex: 2, maxWidth: size, maxHeight: "22%", objectFit: "contain" };
+  switch (position) {
+    case "top-left":      return { ...base, top: pad, left: pad };
+    case "top-right":     return { ...base, top: pad, right: pad };
+    case "top-center":    return { ...base, top: pad, left: "50%", transform: "translateX(-50%)" };
+    case "bottom-left":   return { ...base, bottom: pad, left: pad };
+    case "bottom-right":  return { ...base, bottom: pad, right: pad };
+    case "bottom-center": return { ...base, bottom: pad, left: "50%", transform: "translateX(-50%)" };
+    default:              return { ...base, top: pad, left: "50%", transform: "translateX(-50%)" };
+  }
+}
+
 function ProductCard({ story }) {
+  const logoInputRef = useRef(null);
   const [imageIndex, setImageIndex] = useState(() => {
     const idx = story.imageCandidates?.indexOf(story.imageUrl) ?? -1;
     return idx >= 0 ? idx : 0;
@@ -549,6 +606,8 @@ function ProductCard({ story }) {
   const [logoImageFailed, setLogoImageFailed] = useState(false);
   const [editedText, setEditedText] = useState(story.text);
   const [isEditing, setIsEditing] = useState(false);
+  const [fontFamily, setFontFamily] = useState(FONTS[0].value);
+  const [uploadedLogo, setUploadedLogo] = useState(null); // { dataUrl, position, scale }
 
   const lines = editedText.split("\n");
   const activeImage = imageExhausted ? "" : story.imageCandidates?.[imageIndex] ?? story.imageUrl;
@@ -565,15 +624,28 @@ function ProductCard({ story }) {
     });
   }
 
+  function handleLogoUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setUploadedLogo({ dataUrl: ev.target.result, position: "top-center", scale: 0.35 });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
   async function handleDownload() {
     if (isDownloading) return;
     setIsDownloading(true);
     try {
-      await downloadStoryImage({ ...story, text: editedText }, activeImage, showLogo);
+      await downloadStoryImage({ ...story, text: editedText }, activeImage, showLogo, fontFamily, uploadedLogo);
     } finally {
       setIsDownloading(false);
     }
   }
+
+  const headlineFont = fontFamily.startsWith("'") ? fontFamily.split("'")[1] : fontFamily.split(",")[0].trim();
 
   return (
     <article className="product-card">
@@ -605,13 +677,21 @@ function ProductCard({ story }) {
             {shouldShowLogoLabel ? <div className="product-wordmark">{story.logo.label}</div> : null}
           </div>
         ) : null}
+        {uploadedLogo ? (
+          <img
+            src={uploadedLogo.dataUrl}
+            alt="custom logo"
+            style={getUploadedLogoStyle(uploadedLogo.position, uploadedLogo.scale)}
+          />
+        ) : null}
         <div className="product-divider" />
-        <div className="headline-stack">
+        <div className="headline-stack" style={{ fontFamily }}>
           {lines.map((line, index) => (
             <div key={`${line}-${index}`}>{line}</div>
           ))}
         </div>
       </div>
+
       {isEditing ? (
         <textarea
           className="product-edit-textarea"
@@ -620,10 +700,66 @@ function ProductCard({ story }) {
           rows={3}
         />
       ) : null}
+
+      {/* Font picker */}
+      <div className="product-section-label">Font</div>
+      <div className="font-picker">
+        {FONTS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            className={`font-option${fontFamily === f.value ? " font-option-active" : ""}`}
+            style={{ fontFamily: f.value }}
+            onClick={() => setFontFamily(f.value)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Logo upload + controls */}
+      <div className="product-section-label">Logo</div>
+      <input ref={logoInputRef} type="file" accept="image/png,image/webp,image/gif" style={{ display: "none" }} onChange={handleLogoUpload} />
+      {!uploadedLogo ? (
+        <button type="button" className="download-post-button" onClick={() => logoInputRef.current?.click()}>
+          Upload Logo (PNG)
+        </button>
+      ) : (
+        <div className="logo-controls">
+          <div className="logo-position-grid">
+            {LOGO_POSITIONS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`logo-pos-btn${uploadedLogo.position === p.id ? " logo-pos-active" : ""}`}
+                onClick={() => setUploadedLogo((c) => ({ ...c, position: p.id }))}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="logo-size-row">
+            <span className="product-section-label" style={{ margin: 0 }}>Size</span>
+            <input
+              type="range"
+              min="0.1"
+              max="0.7"
+              step="0.05"
+              value={uploadedLogo.scale}
+              onChange={(e) => setUploadedLogo((c) => ({ ...c, scale: parseFloat(e.target.value) }))}
+              className="logo-size-slider"
+            />
+          </div>
+          <button type="button" className="download-post-button" style={{ marginTop: 0 }} onClick={() => setUploadedLogo(null)}>
+            Remove Logo
+          </button>
+        </div>
+      )}
+
       <div className="product-controls">
         {story.logo?.canRender ? (
           <button type="button" className="download-post-button" onClick={() => setShowLogo((c) => !c)}>
-            {showLogo ? "Hide Logo" : "Show Logo"}
+            {showLogo ? "Hide Brand Logo" : "Show Brand Logo"}
           </button>
         ) : null}
         <button type="button" className="download-post-button" onClick={() => setIsEditing((c) => !c)}>
