@@ -379,44 +379,82 @@ async function filterRelevance(candidates, apiKey) {
 
 // ─── Pass 2: headline writer (one story at a time) ────────────────────────────
 
-const HEADLINE_PROMPT = `You write 3-line poster headlines for Instagram. Think billboard — reads in 1 second.
+const HEADLINE_PROMPT = `You write captions for an Instagram deal page. Each caption goes on a static slide and must be understood in one glance.
 
-Line 1: BRAND NAME (1–3 words)
-Line 2: THE DEAL — what you get or what happened (2–4 words, specific)
-Line 3: KEY DETAIL — price, date, or how to get it (2–4 words)
+─── STRUCTURE ────────────────────────────────────────────────────────────────
 
-Examples of correct output:
-MCDONALD'S
-BURGERS 67¢
-EVERY WEDNESDAY
+Every caption follows this order:
+  Line 1: BRAND
+  Line 2: THE DEAL or NEWS
+  Line 3: DATE / PRICE / HOW TO GET IT
+
+─── THE MOST IMPORTANT RULE: BE LOGICAL ──────────────────────────────────────
+
+The words must read naturally from top to bottom. Each line must make sense:
+  - by itself
+  - with the line above it
+  - with the line below it
+
+Line breaks must group words that belong together. Never split a thought
+in the wrong place. The reader should instantly understand: who, what, why now.
+
+─── CORRECT EXAMPLES ─────────────────────────────────────────────────────────
+
+SUBWAY
+BUY ONE FOOTLONG
+GET ONE FREE
+
+CHURCH'S
+8-PIECE CHICKEN
+JUST $4.99
 
 WENDY'S
-FREE FROSTY
-$3 KEYCHAIN
+JR. FROSTY FOR A YEAR
+$3 KEY TAG
 
 BEN & JERRY'S
 FREE CONE DAY
-APRIL 14TH
-
-SHAKE SHACK
-BOGO BURGERS
-THRU APRIL 22
+APRIL 14
 
 COSTCO
 VITAMIX $100 OFF
-THIS WEEK
+THIS WEEK ONLY
 
-TACO BELL
-FREE TACO
-SURVEY REQUIRED
+SAM'S CLUB
+SAVINGS END
+APRIL 12
 
-Rules:
+AMAZON
+GET GIFT CARDS
+FOR OLD TECH
+
+POTBELLY
+BUY ONE SANDWICH
+GET ONE FREE
+
+─── WRONG EXAMPLES (do not do this) ─────────────────────────────────────────
+
+WENDY'S            ← BAD: splits "JR. FROSTY FOR A YEAR" across lines
+JR. FROSTY
+FOR A YEAR $3 KEY TAG
+
+BUY ONE            ← BAD: splits "BUY ONE FOOTLONG" across lines
+FOOTLONG GET
+ONE FREE
+
+─── RULES ────────────────────────────────────────────────────────────────────
+
 - ALL CAPS always
-- Each line is a label or keyword phrase, never a sentence
-- Only use facts from the article — never invent prices or dates
-- No filler words like "BIG SAVINGS", "GREAT DEAL", "DON'T MISS OUT"
+- Short, direct, logical — reads like a stacked sign or consumer alert
+- Each line is a complete thought or natural phrase chunk
+- Only use facts from the article — never invent prices, dates, or details
+- No filler: "BIG SAVINGS", "GREAT DEAL", "DON'T MISS", "AMAZING OFFER"
+- No full sentences — compressed headline style only
+- The strongest information comes first
 
-Return ONLY a JSON object with three fields, no other text:
+─── OUTPUT ───────────────────────────────────────────────────────────────────
+
+Return ONLY a JSON object, no other text:
 {"line1":"...","line2":"...","line3":"..."}`;
 
 async function writeHeadline(candidate, apiKey) {
