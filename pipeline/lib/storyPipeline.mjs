@@ -223,9 +223,26 @@ function titleFingerprint(title) {
     .join(" ");
 }
 
+// Build a "deal fingerprint" — brand + the core deal words — to catch duplicate
+// coverage of the same event from different outlets (e.g. 3 sites all posting about
+// Dairy Queen free cone day → keep only the first one).
+function dealFingerprint(candidate) {
+  const stopWords = new Set(["a","an","the","to","in","on","at","for","of","and","or","is","are","with","get","how","you","your","its","this","that","from","by","be","was","were","has","have","will","can","all","new","one","two","per","day","week","now","just","via","over","up","off","out","into","free","deal","deals","offer","offers","promotion","limited","time","today","tomorrow"]);
+  const words = candidate.title
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, "")
+    .split(/\s+/)
+    .filter((w) => !stopWords.has(w) && w.length > 2)
+    .slice(0, 5)
+    .join(" ");
+  return `${candidate.brand}:${words}`;
+}
+
 function preFilter(candidates) {
   const seenUrls = new Set();
-  const seenFingerprints = new Set();
+  const seenTitleFps = new Set();
+  const seenDealFps = new Set();
+  const brandCount = {};
 
   return candidates.filter((c) => {
     const text = `${c.title} ${c.rawSummary}`.toLowerCase();
@@ -238,12 +255,20 @@ function preFilter(candidates) {
     if (seenUrls.has(c.sourceUrl)) return false;
     seenUrls.add(c.sourceUrl);
     // Title similarity dedup
-    const fp = titleFingerprint(c.title);
-    if (seenFingerprints.has(fp)) return false;
-    seenFingerprints.add(fp);
+    const titleFp = titleFingerprint(c.title);
+    if (seenTitleFps.has(titleFp)) return false;
+    seenTitleFps.add(titleFp);
+    // Same-deal dedup across outlets — cap at 1 article per brand+deal combo
+    const dealFp = dealFingerprint(c);
+    if (seenDealFps.has(dealFp)) return false;
+    seenDealFps.add(dealFp);
+    // Cap at 2 stories per brand so one brand can't flood the feed
+    const bc = brandCount[c.brand] || 0;
+    if (bc >= 2) return false;
+    brandCount[c.brand] = bc + 1;
 
     return true;
-  }).slice(0, 60); // send up to 60 candidates to AI — it decides what's actually worth posting
+  }).slice(0, 30); // 30 candidates keeps AI response well under token limit
 }
 
 // ─── All sources ──────────────────────────────────────────────────────────────
@@ -351,18 +376,27 @@ CHICK-FIL-A / FREE SANDWICH / APP ONLY
 
 RULES:
 - ALL CAPS always
-- Max 5–6 words per line — shorter is better
+- Max 5 words per line — shorter is better, do NOT write sentences
 - Only use details from the title/summary — never invent prices or dates
 - No filler: "BIG SAVINGS" "GREAT DEAL" "DON'T MISS" "AMAZING" "HOT DEAL"
-- Never write a full sentence
+- Never write a full sentence — fragments and keywords only
+- If multiple input items cover the exact same deal, mark only the first as relevant=true; mark the rest relevant=false
 
 ─── OUTPUT ───────────────────────────────────────────────────────────────────
 
-Return ONLY a JSON array. Every input item must appear in the output.
+Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
+Each element is ONE of these two shapes:
 { "id": "...", "relevant": true, "line1": "...", "line2": "...", "line3": "..." }
 { "id": "...", "relevant": false }
 
-No markdown. No explanation. Just the JSON array.`;
+IMPORTANT: line1, line2, and line3 must each be 1–5 words. No exceptions.`;
+
+// Validate a single headline line — must be 1–6 words, no sentence fragments
+function isValidLine(line) {
+  if (!line || typeof line !== "string") return false;
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  return words.length >= 1 && words.length <= 6;
+}
 
 async function filterAndRewriteWithAI(candidates, apiKey) {
   const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
@@ -371,8 +405,8 @@ async function filterAndRewriteWithAI(candidates, apiKey) {
     headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.2,
-      max_tokens: 6000,
+      temperature: 0.1,
+      max_tokens: 3000,
       messages: [
         { role: "system", content: HEADLINE_PROMPT },
         { role: "user", content: JSON.stringify(payload) },
@@ -382,17 +416,42 @@ async function filterAndRewriteWithAI(candidates, apiKey) {
   });
   if (!response.ok) throw new Error(`Groq ${response.status}`);
   const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || "";
+
+  // Log finish reason so we can diagnose truncation
+  const choice = data.choices?.[0];
+  if (choice?.finish_reason && choice.finish_reason !== "stop") {
+    console.warn(`[pipeline] Groq finish_reason=${choice.finish_reason} — response may be truncated`);
+  }
+
+  const text = choice?.message?.content || "";
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) throw new Error("No JSON in Groq response");
-  const results = JSON.parse(match[0]);
 
-  // Only return items the AI marked as relevant, with their rewritten headlines
+  let results;
+  try {
+    results = JSON.parse(match[0]);
+  } catch (e) {
+    // Truncated JSON — try to salvage complete objects
+    const partial = match[0].replace(/,?\s*\{[^}]*$/, "]"); // drop the last incomplete object
+    results = JSON.parse(partial);
+    console.warn("[pipeline] Groq JSON was truncated — salvaged partial results");
+  }
+
+  // Only return items the AI marked as relevant, with validated headlines
   return candidates
     .map((c) => {
       const r = results.find((item) => item.id === c.id);
       if (!r?.relevant) return null;
-      return { ...c, headline: [r.line1, r.line2, r.line3].filter(Boolean).join("\n") };
+
+      // Validate every line — if any line is garbled/too long, drop this item
+      const lines = [r.line1, r.line2, r.line3].filter(Boolean);
+      if (lines.length === 0) return null;
+      if (!lines.every(isValidLine)) {
+        console.warn(`[pipeline] Dropping garbled headline for "${c.title}":`, lines);
+        return null;
+      }
+
+      return { ...c, headline: lines.join("\n") };
     })
     .filter(Boolean);
 }
