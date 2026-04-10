@@ -864,7 +864,14 @@ export default function App() {
       const available = fresh.filter((h) => !usedIds.has(h.storyId) && !seenIds.has(h.storyId));
       setAllFetched(available);
       const needed = Math.max(0, 8 - held.length);
-      setHeadlines([...held, ...available.slice(0, needed)]);
+      const nextHeadlines = [...held, ...available.slice(0, needed)];
+      setHeadlines(nextHeadlines);
+
+      // Mark the new batch as seen immediately — so a browser page refresh
+      // won't reset state and show the same stories again
+      for (const h of nextHeadlines) {
+        if (h.status !== "held") addSeenId(h.storyId);
+      }
     } catch {
       setStoriesError("Could not load stories — make sure the dev server is running.");
     } finally {
