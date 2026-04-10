@@ -268,7 +268,7 @@ function preFilter(candidates) {
     brandCount[c.brand] = bc + 1;
 
     return true;
-  }).slice(0, 30); // 30 candidates keeps AI response well under token limit
+  }).slice(0, 15); // 15 candidates — small batch prevents token overrun and word-scrambling
 }
 
 // ─── All sources ──────────────────────────────────────────────────────────────
@@ -365,22 +365,32 @@ MCDONALD'S
 BURGERS 67¢
 EVERY WEDNESDAY
 
-MORE EXAMPLES:
-WENDY'S / FREE FROSTY FOR A YEAR / $3 KEYCHAIN
+MORE CORRECT EXAMPLES:
+WENDY'S / FREE FROSTY FOR YEAR / $3 KEYCHAIN
 BEN & JERRY'S / FREE CONE DAY / APRIL 14TH
-SHAKE SHACK / BOGO K-SHACK / THROUGH APRIL 22
-COSTCO / VITAMIX $100 OFF / THIS WEEK ONLY
-TACO BELL / FREE TACO / TAKE THE SURVEY
-STARBUCKS / BOGO DRINKS / AFTER 3PM TODAY
+SHAKE SHACK / BOGO BURGERS / THRU APRIL 22
+COSTCO / VITAMIX $100 OFF / MEMBERS ONLY
+TACO BELL / FREE TACO / SURVEY REQUIRED
+STARBUCKS / BOGO DRINKS / AFTER 3PM
 CHICK-FIL-A / FREE SANDWICH / APP ONLY
+DAIRY QUEEN / FREE CONE DAY / APRIL 14TH
+FIVE GUYS / FREE FRIES / LOYALTY APP
+
+WRONG — do not write these:
+✗ "FREE IS IT CONE" — scrambled words, contains "IS" and "IT"
+✗ "FREE TODAY IS THE" — sentence words, makes no sense
+✗ "IS OFFERING FREE CONES" — sentence fragment
+✗ "GET A FREE CONE" — sentence, contains "A"
+✗ "CONE DAY IS HERE" — sentence, contains "IS"
 
 RULES:
 - ALL CAPS always
-- Max 5 words per line — shorter is better, do NOT write sentences
+- Max 5 words per line — shorter is better
+- NEVER use words: IS, IT, THE, A, AN, BE, WAS, WERE, ARE, HAS, THIS, THAT, GET, FOR, AND, OR, IN, TO, OF
+- Only use nouns, adjectives, prices, dates, brand names, and deal verbs (FREE, BOGO, OFF, SAVE)
 - Only use details from the title/summary — never invent prices or dates
-- No filler: "BIG SAVINGS" "GREAT DEAL" "DON'T MISS" "AMAZING" "HOT DEAL"
-- Never write a full sentence — fragments and keywords only
-- If multiple input items cover the exact same deal, mark only the first as relevant=true; mark the rest relevant=false
+- No filler: "BIG SAVINGS" "GREAT DEAL" "DON'T MISS"
+- If multiple items cover the exact same deal, mark only the first as relevant=true
 
 ─── OUTPUT ───────────────────────────────────────────────────────────────────
 
@@ -391,11 +401,18 @@ Each element is ONE of these two shapes:
 
 IMPORTANT: line1, line2, and line3 must each be 1–5 words. No exceptions.`;
 
-// Validate a single headline line — must be 1–6 words, no sentence fragments
+// Words that appear in sentences but never in billboard poster copy.
+// If any of these show up, the AI wrote a sentence fragment, not a headline.
+const SENTENCE_WORDS = new Set(["IS","IT","THE","A","AN","BE","WAS","WERE","ARE","HAS","HAVE","THIS","THAT","FOR","AND","OR","IN","ON","AT","TO","OF","BY","IF","AS","SO","DO","DID","GET","GOT","ITS","HIS","HER","THEM","THEY","WE","YOU","YOUR"]);
+
+// Validate a single headline line — must be 1–5 words, no sentence glue words
 function isValidLine(line) {
   if (!line || typeof line !== "string") return false;
   const words = line.trim().split(/\s+/).filter(Boolean);
-  return words.length >= 1 && words.length <= 6;
+  if (words.length < 1 || words.length > 5) return false;
+  // Reject if any word is a sentence-glue word (means AI wrote a fragment, not a poster line)
+  if (words.some((w) => SENTENCE_WORDS.has(w.toUpperCase().replace(/[^A-Z]/g, "")))) return false;
+  return true;
 }
 
 async function filterAndRewriteWithAI(candidates, apiKey) {
