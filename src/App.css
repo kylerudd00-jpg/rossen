@@ -32,8 +32,21 @@
   max-width: 52rem;
 }
 
-.header-actions,
+.header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .headline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-buttons {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -80,8 +93,7 @@
 }
 
 .submit-headline-button {
-  margin-top: 4px;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .submit-headline-button:not(:disabled):hover {

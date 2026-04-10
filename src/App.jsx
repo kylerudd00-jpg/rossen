@@ -439,36 +439,38 @@ function HeadlineCard({ item, onTextChange, onStatusChange, onSubmitDecision, su
         <p className="headline-context">{item.context}</p>
       </div>
       <div className="headline-actions">
+        <div className="review-buttons">
+          <button
+            type="button"
+            className={item.status === "approved" ? "selected-action" : ""}
+            onClick={() => onStatusChange(item.localId, "approved")}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className={item.status === "held" ? "selected-action" : "secondary-button"}
+            onClick={() => onStatusChange(item.localId, "held")}
+          >
+            Hold
+          </button>
+          <button
+            type="button"
+            className={item.status === "denied" ? "selected-action" : "secondary-button"}
+            onClick={() => onStatusChange(item.localId, "denied")}
+          >
+            Deny
+          </button>
+        </div>
         <button
           type="button"
-          className={item.status === "approved" ? "selected-action" : ""}
-          onClick={() => onStatusChange(item.localId, "approved")}
+          className="submit-headline-button"
+          onClick={() => onSubmitDecision(item.localId)}
+          disabled={submitDisabled}
         >
-          Approve
-        </button>
-        <button
-          type="button"
-          className={item.status === "held" ? "selected-action" : "secondary-button"}
-          onClick={() => onStatusChange(item.localId, "held")}
-        >
-          Hold
-        </button>
-        <button
-          type="button"
-          className={item.status === "denied" ? "selected-action" : "secondary-button"}
-          onClick={() => onStatusChange(item.localId, "denied")}
-        >
-          Deny
+          Submit
         </button>
       </div>
-      <button
-        type="button"
-        className="submit-headline-button"
-        onClick={() => onSubmitDecision(item.localId)}
-        disabled={submitDisabled}
-      >
-        Submit
-      </button>
     </article>
   );
 }

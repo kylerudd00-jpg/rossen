@@ -214,17 +214,7 @@ async function fetchGoogleNews(maxPerQuery = 3) {
 
 // ─── Scoring & filtering ──────────────────────────────────────────────────────
 
-const DEAL_KEYWORDS = [
-  /\bfree\b/i, /\bbogo\b/i, /\bbuy one\b/i, /\bdeal\b/i, /\boff\b/i,
-  /\bsale\b/i, /\bsavings?\b/i, /\bcoupon\b/i, /\bdiscount\b/i,
-  /\bpromo\b/i, /\boffer\b/i, /\brebate\b/i, /\bcashback\b/i,
-  /\brecall\b/i, /\balert\b/i, /\bwarning\b/i, /\bgiveaway\b/i,
-  /\bfreebie\b/i, /\bsample\b/i, /\breward\b/i, /\bclearance\b/i,
-  /\bmarkdown\b/i, /\bprice\s+drop\b/i, /\blimited\s+time\b/i,
-  /\bgrand\s+opening\b/i, /\bcoming\s+back\b/i, /\breopening\b/i,
-  /\btrade.?in\b/i, /\bgift\s+card\b/i, /\bcomeback\b/i,
-];
-
+// Hard skip — completely irrelevant or always-on noise
 const SKIP_PATTERNS = [
   /\binvestor\b|\bstock\b|\bearnings\b|\bshares\b|\bipo\b|\bwall\s+street\b/i,
   /\belection\b|\bcongress\b|\bsupreme\s+court\b|\bpolitics?\b|\bsenate\b|\bhouse\s+bill\b/i,
@@ -233,37 +223,66 @@ const SKIP_PATTERNS = [
   /\breal\s+estate\b|\bmortgage\b|\bforeclosure\b/i,
   /\bcryptocurrency\b|\bcrypto\b|\bbitcoin\b|\bnft\b/i,
   /\bwar\b|\bmilitary\b|\bterror\b|\battack\b/i,
+  // Generic always-on noise — not newsworthy
+  /\bdigital coupons?\b/i,
+  /\bweekly ad\b|\bweekly deals?\b|\bweekly savings?\b/i,
+  /\bearn points?\b|\bearn rewards?\b|\bjoin.*rewards\b|\brewards program\b/i,
+  /\bhow to (save|shop|get|find|use)\b/i,
+  /\btips? (for|to|on)\b|\bbest ways? to\b|\bguide to\b/i,
+  /\bprice match\b|\bprice matching\b/i,
+  /\bbudget(ing)?\s+(tips?|advice|guide|hack)\b/i,
 ];
 
 function scoreCandidate(c) {
   const text = `${c.title} ${c.rawSummary}`.toLowerCase();
-  let score = 0;
+  const title = c.title.toLowerCase();
 
-  // Skip irrelevant topics entirely
+  // Hard skip
   if (SKIP_PATTERNS.some((p) => p.test(text))) return -999;
 
-  // Deal keywords
-  for (const kw of DEAL_KEYWORDS) {
-    if (kw.test(text)) score += 2;
-  }
+  // Must be a known brand — generic "RETAIL" brand items almost never post-worthy
+  if (c.brand === "RETAIL") return -999;
 
-  // Known brand = more relevant
-  if (c.brand !== "RETAIL") score += 3;
+  let score = 0;
 
-  // Price mention
-  if (/\$[\d]+|\d+%\s*off/i.test(text)) score += 3;
+  // ── Tier 1: high-value, specific events (+8 to +12) ──────────────────────────
+  // BOGO at a named chain
+  if (/\bbogo\b|\bbuy one[,\s]+get one\b/i.test(text)) score += 12;
+  // Food/product recall
+  if (/\brecall\b/i.test(text) && /\bfda\b|\bfsis\b|\bcpsc\b|\bfood\b|\bproduct\b|\bsafety\b/i.test(text)) score += 12;
+  // Free specific named item (not just "free rewards")
+  if (/\bfree\b.{0,30}\b(cup|scoop|cone|slice|sandwich|meal|entree|item|drink|coffee|taco|burger|chicken|pizza|fries|donut|bagel|cookie|sample)\b/i.test(text)) score += 10;
+  // Store closing / bankruptcy
+  if (/\bclosing\b|\bshutting down\b|\bbankruptcy\b|\bgoing out of business\b/i.test(text)) score += 10;
+  // Grand opening or major comeback
+  if (/\bgrand opening\b|\bmaking a comeback\b|\bcoming back\b|\breturning to stores\b/i.test(text)) score += 8;
+  // Specific dollar deal ($X for a named item)
+  if (/\$\d+(?:\.\d{2})?\s+(?:for\s+)?(?:a\s+)?(?:free\s+)?\w/i.test(text) && /\b(meal|sandwich|piece|cup|item|entree|order|box)\b/i.test(text)) score += 8;
 
-  // Date/urgency
-  if (/\b(today|tonight|this week|ends|through|april|may|limited)\b/i.test(text)) score += 2;
+  // ── Tier 2: solid deals (+4 to +6) ───────────────────────────────────────────
+  // Significant % off (30%+)
+  const pctMatch = text.match(/(\d+)\s*%\s*off/i);
+  if (pctMatch && parseInt(pctMatch[1]) >= 30) score += 6;
+  // Price drop on many items
+  if (/(\d[\d,]+)\s+(items?|products?|styles?)/i.test(text) && /\b(cut|lower|reduc|cheaper|off|drop)\b/i.test(text)) score += 6;
+  // New menu item at a chain
+  if (/\bnew\b.{0,20}\b(menu|item|sandwich|burger|taco|pizza|drink|meal|flavor)\b/i.test(text)) score += 5;
+  // Trade-in or gift card deal
+  if (/\btrade.?in\b/i.test(text) && /\bgift\s+card\b/i.test(text)) score += 5;
+  // Any specific $ price mention
+  if (/\$[\d]+/i.test(text)) score += 4;
+  // Date-bound deal (time pressure)
+  if (/\b(through|until|thru|ends?|only on|today only|tonight only)\s+\w/i.test(text)) score += 4;
 
-  // Food/restaurant
-  if (/\b(food|meal|eat|restaurant|sandwich|burger|pizza|taco|chicken|coffee|ice cream|drink|fries)\b/i.test(text)) score += 2;
-
-  // Freebie signals
-  if (/\bfree\b.*\b(cup|scoop|cone|slice|item|meal|sandwich|sample|trial)\b/i.test(text)) score += 4;
-
-  // Penalize vague/generic titles
-  if (c.title.split(" ").length < 4) score -= 2;
+  // ── Penalties: too vague or evergreen ────────────────────────────────────────
+  // Vague "savings" / "deals" without a specific item or number
+  if (!/\$[\d]|\d+\s*%|bogo|buy one|free\s+\w|recall|opening|closing|comeback/i.test(text)) score -= 4;
+  // Survey/app-only without a concrete reward stated
+  if (/\bsurvey\b|\bin the app\b/i.test(text) && !/\bfree\b|\$[\d]|\bget\s+\w/i.test(text)) score -= 3;
+  // Generic coupon / discount language without specifics
+  if (/\bcoupon\b|\bdiscount\b|\bsavings\b/i.test(text) && !/\$[\d]|\d+\s*%|bogo|free\s+\w/i.test(text)) score -= 3;
+  // Very short title = usually not enough info
+  if (title.split(" ").length < 5) score -= 3;
 
   return score;
 }
@@ -277,9 +296,9 @@ function filterAndRank(candidates) {
       return true;
     })
     .map((c) => ({ ...c, _score: scoreCandidate(c) }))
-    .filter((c) => c._score > 0)
+    .filter((c) => c._score >= 8)   // Only items with a clear, specific deal signal
     .sort((a, b) => b._score - a._score)
-    .slice(0, 40); // Pass top 40 to the LLM rewriter
+    .slice(0, 20);  // Tighter set — quality over quantity
 }
 
 // ─── All sources ──────────────────────────────────────────────────────────────
@@ -340,33 +359,54 @@ async function fetchAllSources() {
 
 // ─── AI headline rewriter ─────────────────────────────────────────────────────
 
-const HEADLINE_SYSTEM_PROMPT = `You write headlines for Instagram consumer deal posts. 3 lines, ALL CAPS, poster style.
+const HEADLINE_SYSTEM_PROMPT = `You write poster headlines for Instagram deal posts. Think billboard, not sentence.
 
-FORMAT:
-LINE 1: BRAND NAME
-LINE 2: MAIN DEAL / NEWS (3-5 words, the payoff)
-LINE 3: DATE / PRICE / URGENCY (3-4 words — omit if nothing useful)
+You are given articles about consumer deals, freebies, recalls, and retail news. Your job is to turn each one into a 3-line poster headline. The text will appear in huge bold type on a graphic. It must read instantly.
+
+OUTPUT FORMAT — 3 lines, ALL CAPS:
+line1: BRAND NAME
+line2: THE MAIN PAYOFF (what you get, what happened, what's free — 3-5 words)
+line3: DATE / PRICE / HOW TO GET IT (3-4 words — use "" if nothing concrete)
+
+THE CARDINAL RULE:
+Write like a poster. Not like a sentence. Not like ad copy. Not like a news headline.
+
+WRONG (sentence thinking):
+"Subway is offering a buy one get one deal on footlongs through April 28"
+"Customers can get a free entree by taking a survey in the app"
+"Target has reduced prices on over 3,000 items this spring"
+
+RIGHT (poster thinking):
+SUBWAY / BOGO FOOTLONGS / THROUGH APRIL 28
+QDOBA / FREE ENTREE / TAKE THE SURVEY
+TARGET / 3,000 ITEMS / NOW CHEAPER
+
+MORE RIGHT EXAMPLES:
+CHURCH'S / 8-PIECE CHICKEN / JUST $4.99
+MCDONALD'S / $4 BREAKFAST DEAL / STARTS APRIL 21
+KONA ICE / FREE SHAVED ICE / TAX DAY ONLY
+AMAZON / TRADE IN OLD TECH / GET GIFT CARDS
+SAM'S CLUB / SAVINGS END / APRIL 12
+STARBUCKS / BUY ONE GET ONE / AFTER 3PM
+DUNKIN' / FREE MEDIUM DRINK / WITH ANY PURCHASE
+POTBELLY / BUY ONE SANDWICH / GET ONE FREE
+WENDY'S / $4 $6 $8 DEALS / BIGGIE MEALS
+TRADER JOE'S / RECALL / ALERT
+COSTCO / $100 OFF / THIS WEEK ONLY
 
 RULES:
-- ALL CAPS always
-- Each line max 5-6 words
-- No sentences. No filler. No ad copy. No explanations.
-- Reads in 1 second while scrolling.
-- Feels like a shopper alert or deal page headline.
-
-GOOD EXAMPLES:
-SUBWAY / BOGO FOOTLONGS / THROUGH APRIL 28
-MCDONALD'S / $4 BREAKFAST DEAL / STARTS APRIL 21
-TARGET / PRICES CUT / ON 3,000 ITEMS
-AMAZON / TRADE IN OLD TECH / GET GIFT CARDS
-COSTCO / DEAL ALERT / $100 OFF
-CHURCH'S / 8-PIECE CHICKEN / JUST $4.99
-SAM'S CLUB / SAVINGS END / APRIL 12
-KONA ICE / FREE CUP / TODAY ONLY
-QDOBA / FREE ENTREE / TAKE THE SURVEY
+- ALL CAPS on every line, always
+- Max 5-6 words per line — shorter is better
+- Extract the real deal from the title/summary: item name, price, date, percentage, requirement
+- Never use filler: "BIG SAVINGS" "GREAT DEAL" "HOT DEAL" "DON'T MISS" "SPECIAL OFFER" "AMAZING" "CHECK IT OUT"
+- Never write a full sentence
+- If the deal needs the app → line3 = "IN THE APP"
+- If there's a survey → line3 = "TAKE THE SURVEY"
+- If free with purchase → line3 = "WITH ANY PURCHASE"
+- Never invent details. Only use what's in the title and summary.
 
 Return ONLY a JSON array. Each element: { "id": "...", "line1": "...", "line2": "...", "line3": "..." }
-line3 can be empty string if nothing useful. No markdown, no explanation, just the JSON array.`;
+No markdown. No explanation. Just the JSON.`;
 
 async function rewriteHeadlines(candidates, apiKey) {
   const payload = candidates.map((c) => ({
