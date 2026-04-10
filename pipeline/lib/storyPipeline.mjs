@@ -361,7 +361,7 @@ async function filterRelevance(candidates, apiKey) {
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
       temperature: 0,
-      max_tokens: 800,
+      max_tokens: 32768,
       messages: [
         { role: "system", content: FILTER_PROMPT },
         { role: "user", content: JSON.stringify(payload) },
@@ -427,7 +427,7 @@ async function writeHeadline(candidate, apiKey) {
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
       temperature: 0.1,
-      max_tokens: 80,
+      max_tokens: 32768,
       messages: [
         { role: "system", content: HEADLINE_PROMPT },
         { role: "user", content: article },
