@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { brandVisuals } from "./data/brandVisuals";
 
@@ -216,17 +216,13 @@ async function downloadStoryImage(story, activeImage, showLogo) {
   triggerDownload(blob, createFilename(story));
 }
 
-// ─── API ──────────────────────────────────────────────────────────────────────
-
 // ─── Rule-based headline formatter ───────────────────────────────────────────
-// Produces BRAND / DEAL / URGENCY in poster style when no AI key is available.
 
 function escRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function stripBrand(text, brand) {
-  // Remove brand name and common suffixes like "USA", "Inc", "Corp"
   const variants = [brand, brand.replace(/[^a-z0-9 ]/gi, " ").trim()].filter(Boolean);
   let out = text;
   for (const v of variants) {
@@ -250,13 +246,11 @@ function stripFiller(text) {
     .trim();
 }
 
-// Extract first price mention: $4.99, $100, 50% off, half off
 function extractPrice(text) {
   const m = text.match(/\$[\d,]+(?:\.\d{2})?|\d+(?:\.\d+)?%\s*off|\bhalf\s+off\b/i);
   return m ? m[0].toUpperCase() : null;
 }
 
-// Extract date/deadline: "through April 28", "ends April 12", "starting April 21"
 function extractDeadline(text) {
   const m = text.match(
     /\b(through|until|thru|ends?\s+(?:on)?|starting|starts?\s+(?:on)?|on|by)\s+((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,?\s*\d{4})?)/i
@@ -264,7 +258,6 @@ function extractDeadline(text) {
   return m ? m[0].toUpperCase() : null;
 }
 
-// Trim a phrase to max N words, clean punctuation
 function trimWords(text, n) {
   return text
     .replace(/[,;:–—]+/g, " ")
@@ -278,19 +271,13 @@ function trimWords(text, n) {
 function formatHeadlineText(title, brand) {
   const up = (s) => s.toUpperCase();
   const brandLine = up(brand);
-
-  // 1. Strip brand and filler from title to get the core news
   let core = stripFiller(stripBrand(title, brand));
 
-  // 2. Detect headline type and build lines accordingly
-
-  // RECALL
   if (/\brecall\b/i.test(title)) {
     const item = trimWords(core.replace(/\brecall\w*/gi, ""), 3);
     return [brandLine, item ? `${up(item)} RECALLED` : "RECALL", "ALERT"].filter(Boolean).join("\n");
   }
 
-  // BOGO / buy one get one
   if (/buy one[,\s]+get one|bogo/i.test(title)) {
     const item = core.replace(/buy one[,\s]+get one(\s+free)?|bogo(\s+free)?/gi, "").trim();
     const line2 = item ? `BOGO ${up(trimWords(item, 2))}` : "BOGO DEAL";
@@ -298,7 +285,6 @@ function formatHeadlineText(title, brand) {
     return [brandLine, line2, line3].filter(Boolean).join("\n");
   }
 
-  // STORE OPENING / COMEBACK / RETURNING
   if (/grand opening|opening soon|new stores?|coming soon/i.test(title)) {
     const countM = title.match(/(\d[\d,]*)\s+new\s+stores?/i);
     const line2 = countM ? `${countM[1]} NEW STORES` : "GRAND OPENING";
@@ -310,18 +296,15 @@ function formatHeadlineText(title, brand) {
     return [brandLine, "IS COMING BACK", extractDeadline(title) ?? ""].filter(Boolean).join("\n");
   }
 
-  // STORE CLOSING
   if (/\bclosing\b|\bshutting\b|\bbankruptcy\b/i.test(title)) {
     return [brandLine, "STORE CLOSING", extractDeadline(title) ?? ""].filter(Boolean).join("\n");
   }
 
-  // PRICE CUT / SALE on N items
   const itemCountM = title.match(/(\d[\d,]+)\s+(items?|products?|things?|styles?)/i);
   if (itemCountM && /price|cut|lower|reduc|cheaper|sale|off|discount/i.test(title)) {
     return [brandLine, `PRICES CUT ON`, `${itemCountM[1].toUpperCase()} ITEMS`].join("\n");
   }
 
-  // CLEARANCE / PERCENT OFF
   const pctM = title.match(/(\d+)\s*%\s*(?:to\s*\d+\s*%\s*)?off/i);
   if (pctM) {
     const pct = `${pctM[0].toUpperCase()}`;
@@ -329,7 +312,6 @@ function formatHeadlineText(title, brand) {
     return [brandLine, subject || "CLEARANCE SALE", pct].filter(Boolean).join("\n");
   }
 
-  // PRICE DEAL ($X something)
   const price = extractPrice(title);
   if (price) {
     const subject = up(trimWords(core.replace(/\$[\d,.]+/g, ""), 3));
@@ -339,20 +321,17 @@ function formatHeadlineText(title, brand) {
       .join("\n");
   }
 
-  // FREE item deal
   if (/\bfree\b/i.test(title)) {
     const item = up(trimWords(core.replace(/\bfree\b/gi, ""), 3));
     const deadline = extractDeadline(title) ?? "";
     return [brandLine, item ? `FREE ${item}` : "FREE DEAL", deadline].filter(Boolean).join("\n");
   }
 
-  // GIFT CARD
   if (/gift\s+card/i.test(title)) {
     const action = /trade.?in/i.test(title) ? "TRADE IN FOR GIFT CARDS" : "GIFT CARD DEAL";
     return [brandLine, action, extractDeadline(title) ?? ""].filter(Boolean).join("\n");
   }
 
-  // LAST RESORT: strip filler, take first 5-6 words, split into 2 lines
   const words = up(stripFiller(core)).split(/\s+/).filter(Boolean).slice(0, 7);
   const mid = Math.ceil(words.length / 2);
   const line2 = words.slice(0, mid).join(" ");
@@ -367,13 +346,31 @@ function imageQueryFor(brand) {
   return `${name} ${type}`;
 }
 
+// ─── localStorage seen-ID cache ───────────────────────────────────────────────
+
+const SEEN_KEY = "dp-seen-ids";
+
+function loadSeenIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
+function addSeenId(id) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
+    const updated = [...new Set([...existing, id])].slice(-500);
+    localStorage.setItem(SEEN_KEY, JSON.stringify(updated));
+  } catch {}
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+
 function candidateToHeadline(candidate) {
   return {
     localId: `${candidate.id}-${Math.random().toString(36).slice(2)}`,
     storyId: candidate.id,
     brand: candidate.brand,
     status: "unreviewed",
-    // Use AI-rewritten headline if present, otherwise fall back to rule-based formatter
     text: candidate.headline ?? formatHeadlineText(candidate.title, candidate.brand),
     sourceName: candidate.sourceDomain,
     sourceTitle: candidate.title,
@@ -475,7 +472,7 @@ function HeadlineCard({ item, onTextChange, onStatusChange, onSubmitDecision, su
   );
 }
 
-function ImagePicker({ brand, images, selectedIndex, onSelect, onConfirm, onSkip, isLoading }) {
+function ImagePicker({ brand, headlineLines, images, selectedIndex, onSelect, onConfirm, onSkip, isLoading }) {
   const activeImage = images[selectedIndex];
 
   return (
@@ -491,7 +488,20 @@ function ImagePicker({ brand, images, selectedIndex, onSelect, onConfirm, onSkip
         <div className="image-picker-loading">No photos found.</div>
       ) : (
         <div className="image-picker-preview-wrap">
-          <img className="image-picker-preview" src={activeImage} alt={`Option ${selectedIndex + 1}`} />
+          <div className="picker-canvas">
+            {activeImage ? (
+              <img className="picker-canvas-bg" src={activeImage} alt={`Option ${selectedIndex + 1}`} />
+            ) : (
+              <div className="picker-canvas-bg picker-canvas-fallback" />
+            )}
+            <div className="picker-canvas-overlay" />
+            <div className="picker-divider" />
+            <div className="picker-headline">
+              {headlineLines.map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          </div>
           <div className="image-picker-nav">
             <button
               type="button"
@@ -529,13 +539,18 @@ function ImagePicker({ brand, images, selectedIndex, onSelect, onConfirm, onSkip
 }
 
 function ProductCard({ story }) {
-  const [imageIndex, setImageIndex] = useState(0);
+  const [imageIndex, setImageIndex] = useState(() => {
+    const idx = story.imageCandidates?.indexOf(story.imageUrl) ?? -1;
+    return idx >= 0 ? idx : 0;
+  });
   const [imageExhausted, setImageExhausted] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [showLogo, setShowLogo] = useState(Boolean(story.logo?.initialVisible));
   const [logoImageFailed, setLogoImageFailed] = useState(false);
+  const [editedText, setEditedText] = useState(story.text);
+  const [isEditing, setIsEditing] = useState(false);
 
-  const lines = story.text.split("\n");
+  const lines = editedText.split("\n");
   const activeImage = imageExhausted ? "" : story.imageCandidates?.[imageIndex] ?? story.imageUrl;
   const logoPlacementStyle = getLogoPlacementStyle(story.logo);
   const shouldShowLogoImage = showLogo && story.logo?.imageUrl && !logoImageFailed;
@@ -554,7 +569,7 @@ function ProductCard({ story }) {
     if (isDownloading) return;
     setIsDownloading(true);
     try {
-      await downloadStoryImage(story, activeImage, showLogo);
+      await downloadStoryImage({ ...story, text: editedText }, activeImage, showLogo);
     } finally {
       setIsDownloading(false);
     }
@@ -597,12 +612,23 @@ function ProductCard({ story }) {
           ))}
         </div>
       </div>
+      {isEditing ? (
+        <textarea
+          className="product-edit-textarea"
+          value={editedText}
+          onChange={(e) => setEditedText(e.target.value.toUpperCase())}
+          rows={3}
+        />
+      ) : null}
       <div className="product-controls">
         {story.logo?.canRender ? (
           <button type="button" className="download-post-button" onClick={() => setShowLogo((c) => !c)}>
             {showLogo ? "Hide Logo" : "Show Logo"}
           </button>
         ) : null}
+        <button type="button" className="download-post-button" onClick={() => setIsEditing((c) => !c)}>
+          {isEditing ? "Done Editing" : "Edit Text"}
+        </button>
         <button type="button" className="download-post-button" onClick={handleDownload} disabled={isDownloading}>
           {isDownloading ? "Preparing PNG…" : "Download High-Res PNG"}
         </button>
@@ -611,13 +637,45 @@ function ProductCard({ story }) {
   );
 }
 
+// ─── Loading progress ─────────────────────────────────────────────────────────
+
+const LOADING_STEPS = [
+  { pct: 4,  msg: "Connecting to news sources…" },
+  { pct: 12, msg: "Scanning Slickdeals, DealNews, Brad's Deals…" },
+  { pct: 22, msg: "Reading Hip2Save, Krazy Coupon Lady, Freebie Guy…" },
+  { pct: 32, msg: "Checking Hunt4Freebies, FreebieSHARK, Freeflys…" },
+  { pct: 42, msg: "Browsing Reddit: r/deals, r/freebies, r/coupons…" },
+  { pct: 52, msg: "Scanning QSR Magazine, Restaurant Business, NRN…" },
+  { pct: 61, msg: "Checking Retail Dive, Grocery Dive, Supermarket News…" },
+  { pct: 70, msg: "Running Google News deal searches…" },
+  { pct: 78, msg: "Reading Lord of Savings, Clark Howard, Penny Hoarder…" },
+  { pct: 85, msg: "Filtering and ranking by relevance…" },
+  { pct: 92, msg: "Rewriting headlines with AI…" },
+  { pct: 97, msg: "Almost done…" },
+];
+
+function LoadingProgress({ pct, msg }) {
+  return (
+    <div className="loading-progress">
+      <div className="loading-progress-bar">
+        <div className="loading-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="loading-progress-msg">{msg}</div>
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [headlines, setHeadlines] = useState([]);
+  const [allFetched, setAllFetched] = useState([]);
   const [posts, setPosts] = useState([]);
   const [isLoadingStories, setIsLoadingStories] = useState(false);
+  const [loadingComplete, setLoadingComplete] = useState(false);
   const [storiesError, setStoriesError] = useState("");
+  const [loadingStep, setLoadingStep] = useState(0);
+  const wasLoadingRef = useRef(false);
 
   // imagePicker: null | { localId, headline, brand, images, selectedIndex, isLoading }
   const [imagePicker, setImagePicker] = useState(null);
@@ -626,16 +684,49 @@ export default function App() {
   const heldCount = useMemo(() => headlines.filter((h) => h.status === "held").length, [headlines]);
   const unreviewedCount = useMemo(() => headlines.filter((h) => h.status === "unreviewed").length, [headlines]);
 
+  const canLoadMore = useMemo(() => {
+    const shownIds = new Set(headlines.map((h) => h.storyId));
+    return allFetched.some((h) => !shownIds.has(h.storyId));
+  }, [allFetched, headlines]);
+
+  // Advance loading step on a timer while fetching
+  useEffect(() => {
+    if (!isLoadingStories) { setLoadingStep(0); return; }
+    setLoadingStep(0);
+    const interval = setInterval(() => {
+      setLoadingStep((s) => (s < LOADING_STEPS.length - 1 ? s + 1 : s));
+    }, 3200);
+    return () => clearInterval(interval);
+  }, [isLoadingStories]);
+
+  // Flash 100% completion for 800ms when loading finishes
+  useEffect(() => {
+    if (wasLoadingRef.current && !isLoadingStories) {
+      setLoadingComplete(true);
+      const t = setTimeout(() => setLoadingComplete(false), 800);
+      return () => clearTimeout(t);
+    }
+    wasLoadingRef.current = isLoadingStories;
+  }, [isLoadingStories]);
+
   async function loadStories() {
     setIsLoadingStories(true);
     setStoriesError("");
     try {
       const held = headlines.filter((h) => h.status === "held");
+
+      // Mark every currently-displayed non-held story as seen so it won't come back on refresh
+      for (const h of headlines) {
+        if (h.status !== "held") addSeenId(h.storyId);
+      }
+
       const usedIds = new Set([...held.map((h) => h.storyId), ...posts.map((p) => p.storyId)]);
+      const seenIds = loadSeenIds(); // includes the IDs we just added
       const fresh = await apiFetchStories();
-      const filtered = fresh.filter((h) => !usedIds.has(h.storyId));
-      const needed = Math.max(0, 5 - held.length);
-      setHeadlines([...held, ...filtered.slice(0, needed)]);
+      const available = fresh.filter((h) => !usedIds.has(h.storyId) && !seenIds.has(h.storyId));
+      setAllFetched(available);
+      const needed = Math.max(0, 8 - held.length);
+      setHeadlines([...held, ...available.slice(0, needed)]);
     } catch {
       setStoriesError("Could not load stories — make sure the dev server is running.");
     } finally {
@@ -647,6 +738,12 @@ export default function App() {
     loadStories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleLoadMore() {
+    const shownIds = new Set(headlines.map((h) => h.storyId));
+    const more = allFetched.filter((h) => !shownIds.has(h.storyId)).slice(0, 5);
+    setHeadlines((current) => [...current, ...more]);
+  }
 
   function handleHeadlineTextChange(localId, value) {
     setHeadlines((current) => current.map((h) => (h.localId === localId ? { ...h, text: value } : h)));
@@ -660,13 +757,12 @@ export default function App() {
     const headline = headlines.find((h) => h.localId === localId);
     if (!headline || headline.status === "unreviewed" || headline.status === "held") return;
 
-    // Remove from headline queue
     setHeadlines((current) => current.filter((h) => h.localId !== localId));
+    addSeenId(headline.storyId);
 
     if (headline.status === "denied") return;
 
     if (headline.status === "approved") {
-      // Open image picker in loading state, store full headline so we can build the post later
       setImagePicker({ localId, headline, brand: headline.brand, images: [], selectedIndex: 0, isLoading: true });
 
       const images = await apiFetchImages(headline.brand).catch(() => []);
@@ -691,6 +787,7 @@ export default function App() {
   }
 
   const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const showLoadingBar = isLoadingStories || loadingComplete;
 
   return (
     <div className="generator-shell">
@@ -745,19 +842,29 @@ export default function App() {
             <p>Edit copy, approve, hold, or deny. Submit when ready — approved ones move to image selection.</p>
           </div>
           <div className="headline-grid">
-            {isLoadingStories && headlines.length === 0 ? (
-              <div className="empty-state">Searching the web for consumer news…</div>
+            {showLoadingBar ? (
+              <LoadingProgress
+                pct={loadingComplete ? 100 : LOADING_STEPS[loadingStep].pct}
+                msg={loadingComplete ? "Stories ready!" : LOADING_STEPS[loadingStep].msg}
+              />
             ) : headlines.length > 0 ? (
-              headlines.map((headline) => (
-                <HeadlineCard
-                  key={headline.localId}
-                  item={headline}
-                  onTextChange={handleHeadlineTextChange}
-                  onStatusChange={handleHeadlineStatusChange}
-                  onSubmitDecision={handleSubmitDecision}
-                  submitDisabled={headline.status === "unreviewed" || headline.status === "held"}
-                />
-              ))
+              <>
+                {headlines.map((headline) => (
+                  <HeadlineCard
+                    key={headline.localId}
+                    item={headline}
+                    onTextChange={handleHeadlineTextChange}
+                    onStatusChange={handleHeadlineStatusChange}
+                    onSubmitDecision={handleSubmitDecision}
+                    submitDisabled={headline.status === "unreviewed" || headline.status === "held"}
+                  />
+                ))}
+                {canLoadMore ? (
+                  <button type="button" className="secondary-button load-more-button" onClick={handleLoadMore}>
+                    Load More Headlines
+                  </button>
+                ) : null}
+              </>
             ) : (
               <div className="empty-state">No headlines. Click Refresh Headlines to pull in more stories.</div>
             )}
@@ -773,6 +880,7 @@ export default function App() {
           {imagePicker ? (
             <ImagePicker
               brand={imagePicker.brand}
+              headlineLines={imagePicker.headline.text.split("\n").filter(Boolean)}
               images={imagePicker.images}
               selectedIndex={imagePicker.selectedIndex}
               onSelect={(index) =>
