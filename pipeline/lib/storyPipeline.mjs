@@ -323,154 +323,151 @@ async function fetchAllSources() {
 
 // ─── AI headline rewriter ─────────────────────────────────────────────────────
 
-const HEADLINE_PROMPT = `You are the content curator and headline writer for a major Instagram deal page with 500k+ followers.
+// ─── Pass 1: relevance filter ─────────────────────────────────────────────────
 
-You will receive a list of articles. For each one you must:
-1. Decide if it is worth posting to a mass-audience deal page
-2. If yes, write a 3-line poster headline
+const FILTER_PROMPT = `You are the content curator for a major Instagram deal page with 500k+ followers.
 
-─── RELEVANCE JUDGMENT ───────────────────────────────────────────────────────
+You will receive a JSON array of articles. For each one, decide: is this worth posting?
 
 POST IT if it is a specific, actionable deal that everyday shoppers care about:
-✓ BOGO at a major chain — "Buy one Whopper, get one free through Sunday"
-✓ Free specific item — "Free cone day at Ben & Jerry's, April 14"
-✓ Unusually low price — "McDonald's burgers 67¢ on Wednesdays"
-✓ Real dollar savings on something popular — "Vitamix $100 off at Costco"
-✓ Bundle deal with clear value — "$3 keychain = free Frosty every visit for a year"
-✓ Time-limited offer with a date — "BOGO K-Shack at Shake Shack through April 22"
-✓ Recall consumers need to act on
+✓ BOGO at a major chain
+✓ Free specific item or free food event
+✓ Unusually low price (e.g. 67¢ burgers, $1 menu items)
+✓ Real dollar savings on something popular (e.g. Vitamix $100 off at Costco)
+✓ Bundle deal with clear value
+✓ Time-limited offer with a date
+✓ Consumer recall people need to act on
 ✓ Major brand closing / bankruptcy
 ✓ Annual freebie event (Free Cone Day, Tax Day deals, National food days)
-✓ Significant % off at a store everyone shops at (30%+ on popular categories)
+✓ 30%+ off at a store everyone shops at
 
-SKIP IT if it is vague, niche, or not actionable:
-✗ "Brand is having a sale" — no specific item, price, or date
-✗ Random product discounts — $5 off a shoe, 20% off a lamp, single SKU deals
+SKIP IT if:
+✗ Vague "brand is having a sale" with no specific item, price, or date
+✗ Random single-SKU product discount ($5 off a shoe)
 ✗ Generic brand news with no consumer deal
-✗ "Brand is coming back" — unless a specific product or deal is named
 ✗ How-to / tips / listicle content
-✗ Deals only relevant to a tiny niche audience
+✗ Niche audience deals
 
-─── HEADLINE FORMAT (for approved items only) ────────────────────────────────
+If multiple articles cover the exact same deal, mark only the best one as relevant.
 
-Think billboard. Not a sentence. Not ad copy. Reads in 1 second.
+Return ONLY a JSON array, one entry per input item, no other text:
+[{"id":"...","relevant":true},{"id":"...","relevant":false}]`;
 
-Line 1: BRAND NAME
-Line 2: THE DEAL — what you get, what happened (3–5 words, specific)
-Line 3: KEY DETAIL — price / date / how to get it (3–4 words)
+async function filterRelevance(candidates, apiKey) {
+  const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      temperature: 0,
+      max_tokens: 800,
+      messages: [
+        { role: "system", content: FILTER_PROMPT },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`Groq filter ${res.status}`);
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const match = text.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error("No JSON in filter response");
+  return JSON.parse(match[0]);
+}
 
-WRONG: "McDonald's is offering burgers at a discounted price on certain days"
-RIGHT:
+// ─── Pass 2: headline writer (one story at a time) ────────────────────────────
+
+const HEADLINE_PROMPT = `You write 3-line poster headlines for Instagram. Think billboard — reads in 1 second.
+
+Line 1: BRAND NAME (1–3 words)
+Line 2: THE DEAL — what you get or what happened (2–4 words, specific)
+Line 3: KEY DETAIL — price, date, or how to get it (2–4 words)
+
+Examples of correct output:
 MCDONALD'S
 BURGERS 67¢
 EVERY WEDNESDAY
 
-MORE CORRECT EXAMPLES:
-WENDY'S / FREE FROSTY FOR YEAR / $3 KEYCHAIN
-BEN & JERRY'S / FREE CONE DAY / APRIL 14TH
-SHAKE SHACK / BOGO BURGERS / THRU APRIL 22
-COSTCO / VITAMIX $100 OFF / MEMBERS ONLY
-TACO BELL / FREE TACO / SURVEY REQUIRED
-STARBUCKS / BOGO DRINKS / AFTER 3PM
-CHICK-FIL-A / FREE SANDWICH / APP ONLY
-DAIRY QUEEN / FREE CONE DAY / APRIL 14TH
-FIVE GUYS / FREE FRIES / LOYALTY APP
+WENDY'S
+FREE FROSTY
+$3 KEYCHAIN
 
-WRONG — do not write these:
-✗ "FREE IS IT CONE" — scrambled words, contains "IS" and "IT"
-✗ "FREE TODAY IS THE" — sentence words, makes no sense
-✗ "IS OFFERING FREE CONES" — sentence fragment
-✗ "GET A FREE CONE" — sentence, contains "A"
-✗ "CONE DAY IS HERE" — sentence, contains "IS"
+BEN & JERRY'S
+FREE CONE DAY
+APRIL 14TH
 
-RULES:
+SHAKE SHACK
+BOGO BURGERS
+THRU APRIL 22
+
+COSTCO
+VITAMIX $100 OFF
+THIS WEEK
+
+TACO BELL
+FREE TACO
+SURVEY REQUIRED
+
+Rules:
 - ALL CAPS always
-- Max 5 words per line — shorter is better
-- NEVER use words: IS, IT, THE, A, AN, BE, WAS, WERE, ARE, HAS, THIS, THAT, GET, FOR, AND, OR, IN, TO, OF
-- Only use nouns, adjectives, prices, dates, brand names, and deal verbs (FREE, BOGO, OFF, SAVE)
-- Only use details from the title/summary — never invent prices or dates
-- No filler: "BIG SAVINGS" "GREAT DEAL" "DON'T MISS"
-- If multiple items cover the exact same deal, mark only the first as relevant=true
+- Each line is a label or keyword phrase, never a sentence
+- Only use facts from the article — never invent prices or dates
+- No filler words like "BIG SAVINGS", "GREAT DEAL", "DON'T MISS OUT"
 
-─── OUTPUT ───────────────────────────────────────────────────────────────────
+Return ONLY a JSON object with three fields, no other text:
+{"line1":"...","line2":"...","line3":"..."}`;
 
-Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
-Each element is ONE of these two shapes:
-{ "id": "...", "relevant": true, "line1": "...", "line2": "...", "line3": "..." }
-{ "id": "...", "relevant": false }
-
-IMPORTANT: line1, line2, and line3 must each be 1–5 words. No exceptions.`;
-
-// Words that appear in sentences but never in billboard poster copy.
-// If any of these show up, the AI wrote a sentence fragment, not a headline.
-const SENTENCE_WORDS = new Set(["IS","IT","THE","A","AN","BE","WAS","WERE","ARE","HAS","HAVE","THIS","THAT","FOR","AND","OR","IN","ON","AT","TO","OF","BY","IF","AS","SO","DO","DID","GET","GOT","ITS","HIS","HER","THEM","THEY","WE","YOU","YOUR"]);
-
-// Validate a single headline line — must be 1–5 words, no sentence glue words
-function isValidLine(line) {
-  if (!line || typeof line !== "string") return false;
-  const words = line.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 1 || words.length > 5) return false;
-  // Reject if any word is a sentence-glue word (means AI wrote a fragment, not a poster line)
-  if (words.some((w) => SENTENCE_WORDS.has(w.toUpperCase().replace(/[^A-Z]/g, "")))) return false;
-  return true;
-}
-
-async function filterAndRewriteWithAI(candidates, apiKey) {
-  const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+async function writeHeadline(candidate, apiKey) {
+  const article = `Brand: ${candidate.brand}\nTitle: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: "llama-3.3-70b-versatile",
       temperature: 0.1,
-      max_tokens: 3000,
+      max_tokens: 80,
       messages: [
         { role: "system", content: HEADLINE_PROMPT },
-        { role: "user", content: JSON.stringify(payload) },
+        { role: "user", content: article },
       ],
     }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error(`Groq ${response.status}`);
-  const data = await response.json();
+  if (!res.ok) throw new Error(`Groq headline ${res.status}`);
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("No JSON in headline response");
+  const { line1, line2, line3 } = JSON.parse(match[0]);
+  const lines = [line1, line2, line3].filter(Boolean);
+  if (lines.length === 0) throw new Error("Empty headline");
+  return lines.join("\n");
+}
 
-  // Log finish reason so we can diagnose truncation
-  const choice = data.choices?.[0];
-  if (choice?.finish_reason && choice.finish_reason !== "stop") {
-    console.warn(`[pipeline] Groq finish_reason=${choice.finish_reason} — response may be truncated`);
-  }
+async function filterAndRewriteWithAI(candidates, apiKey) {
+  // Pass 1: batch relevance filter (cheap — just yes/no per story)
+  const filterResults = await filterRelevance(candidates, apiKey);
+  const approved = candidates.filter((c) => {
+    const r = filterResults.find((item) => item.id === c.id);
+    return r?.relevant === true;
+  });
+  console.log(`[pipeline] AI approved ${approved.length} / ${candidates.length} candidates`);
 
-  const text = choice?.message?.content || "";
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("No JSON in Groq response");
-
-  let results;
-  try {
-    results = JSON.parse(match[0]);
-  } catch (e) {
-    // Truncated JSON — try to salvage complete objects
-    const partial = match[0].replace(/,?\s*\{[^}]*$/, "]"); // drop the last incomplete object
-    results = JSON.parse(partial);
-    console.warn("[pipeline] Groq JSON was truncated — salvaged partial results");
-  }
-
-  // Only return items the AI marked as relevant, with validated headlines
-  return candidates
-    .map((c) => {
-      const r = results.find((item) => item.id === c.id);
-      if (!r?.relevant) return null;
-
-      // Validate every line — if any line is garbled/too long, drop this item
-      const lines = [r.line1, r.line2, r.line3].filter(Boolean);
-      if (lines.length === 0) return null;
-      if (!lines.every(isValidLine)) {
-        console.warn(`[pipeline] Dropping garbled headline for "${c.title}":`, lines);
+  // Pass 2: write each headline individually (focused call = no word scrambling)
+  const withHeadlines = await Promise.all(
+    approved.map(async (c) => {
+      try {
+        const headline = await writeHeadline(c, apiKey);
+        return { ...c, headline };
+      } catch (e) {
+        console.warn(`[pipeline] Headline failed for "${c.title}":`, e.message);
         return null;
       }
-
-      return { ...c, headline: lines.join("\n") };
     })
-    .filter(Boolean);
+  );
+  return withHeadlines.filter(Boolean);
 }
 
 // ─── Main pipeline ────────────────────────────────────────────────────────────
