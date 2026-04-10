@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/stories.js": { "maxDuration": 60 },
+    "api/images.js": { "maxDuration": 15 }
+  }
+}
