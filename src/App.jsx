@@ -784,27 +784,30 @@ function ProductCard({ story }) {
 // ─── Loading progress ─────────────────────────────────────────────────────────
 
 const LOADING_STEPS = [
-  { pct: 4,  msg: "Connecting to news sources…" },
-  { pct: 12, msg: "Scanning Slickdeals, DealNews, Brad's Deals…" },
-  { pct: 22, msg: "Reading Hip2Save, Krazy Coupon Lady, Freebie Guy…" },
-  { pct: 32, msg: "Checking Hunt4Freebies, FreebieSHARK, Freeflys…" },
-  { pct: 42, msg: "Browsing Reddit: r/deals, r/freebies, r/coupons…" },
-  { pct: 52, msg: "Scanning QSR Magazine, Restaurant Business, NRN…" },
-  { pct: 61, msg: "Checking Retail Dive, Grocery Dive, Supermarket News…" },
-  { pct: 70, msg: "Running Google News deal searches…" },
-  { pct: 78, msg: "Reading Lord of Savings, Clark Howard, Penny Hoarder…" },
-  { pct: 85, msg: "Filtering and ranking by relevance…" },
-  { pct: 92, msg: "Rewriting headlines with AI…" },
-  { pct: 97, msg: "Almost done…" },
+  { pct: 4,  msg: "Connecting to news sources…",                        ai: false },
+  { pct: 12, msg: "Scanning Slickdeals, DealNews, Brad's Deals…",       ai: false },
+  { pct: 22, msg: "Reading Hip2Save, Krazy Coupon Lady, Freebie Guy…",  ai: false },
+  { pct: 32, msg: "Checking Hunt4Freebies, FreebieSHARK, Freeflys…",   ai: false },
+  { pct: 42, msg: "Browsing Reddit: r/deals, r/freebies, r/coupons…",  ai: false },
+  { pct: 52, msg: "Scanning QSR Magazine, Restaurant Business, NRN…",  ai: false },
+  { pct: 61, msg: "Checking Retail Dive, Grocery Dive, Supermarket News…", ai: false },
+  { pct: 70, msg: "Running Google News deal searches…",                 ai: false },
+  { pct: 78, msg: "Reading Lord of Savings, Clark Howard, Penny Hoarder…", ai: false },
+  { pct: 85, msg: "AI judging which stories are worth posting…",        ai: true  },
+  { pct: 92, msg: "AI writing headlines…",                              ai: true  },
+  { pct: 97, msg: "AI finishing up…",                                   ai: true  },
 ];
 
-function LoadingProgress({ pct, msg }) {
+function LoadingProgress({ pct, msg, ai, complete }) {
   return (
-    <div className="loading-progress">
+    <div className={`loading-progress${ai ? " loading-progress--ai" : ""}${complete ? " loading-progress--complete" : ""}`}>
       <div className="loading-progress-bar">
         <div className="loading-progress-fill" style={{ width: `${pct}%` }} />
       </div>
-      <div className="loading-progress-msg">{msg}</div>
+      <div className="loading-progress-msg">
+        {ai && <span className="loading-ai-badge">✦ AI</span>}
+        {msg}
+      </div>
     </div>
   );
 }
@@ -1001,6 +1004,8 @@ export default function App() {
               <LoadingProgress
                 pct={loadingComplete ? 100 : LOADING_STEPS[loadingStep].pct}
                 msg={loadingComplete ? "Stories ready!" : LOADING_STEPS[loadingStep].msg}
+                ai={!loadingComplete && LOADING_STEPS[loadingStep].ai}
+                complete={loadingComplete}
               />
             ) : headlines.length > 0 ? (
               <>

@@ -433,22 +433,64 @@
 
 .loading-progress-bar {
   width: 100%;
-  height: 6px;
+  height: 8px;
   border-radius: 999px;
   background: rgba(30, 41, 59, 0.9);
   overflow: hidden;
 }
 
+@keyframes bar-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes bar-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
 .loading-progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #f97316, #fb923c);
+  background: linear-gradient(90deg, #f97316, #f59e0b, #10b981, #3b82f6, #8b5cf6, #ec4899, #f97316);
+  background-size: 300% 100%;
+  animation: bar-shift 3s ease infinite;
   transition: width 0.8s ease;
+}
+
+/* AI phase — purple/violet glow */
+.loading-progress--ai .loading-progress-fill {
+  background: linear-gradient(90deg, #7c3aed, #a855f7, #ec4899, #8b5cf6, #7c3aed);
+  background-size: 300% 100%;
+  animation: bar-shift 1.5s ease infinite, bar-pulse 1.2s ease infinite;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.6);
+}
+
+/* Complete — green flash */
+.loading-progress--complete .loading-progress-fill {
+  background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7);
+  animation: none;
 }
 
 .loading-progress-msg {
   color: #94a3b8;
   font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loading-ai-badge {
+  background: linear-gradient(90deg, #7c3aed, #a855f7);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  animation: bar-pulse 1.2s ease infinite;
 }
 
 .error-banner {
