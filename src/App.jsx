@@ -669,6 +669,7 @@ function LoadingProgress({ pct, msg }) {
 
 const AUTH_KEY = "dp-auth";
 const SITE_PASSWORD = import.meta.env.VITE_APP_PASSWORD;
+console.log("[auth] SITE_PASSWORD:", SITE_PASSWORD);
 
 function useAuth() {
   const [authed, setAuthed] = useState(() => localStorage.getItem(AUTH_KEY) === SITE_PASSWORD);
