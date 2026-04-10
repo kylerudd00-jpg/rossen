@@ -1,0 +1,13 @@
+{
+  "provider": "preview",
+  "recipient": "not-configured",
+  "delivered": false,
+  "note": "Preview only. Configure Resend to send real daily emails.",
+  "items": [
+    {
+      "headline": "UNKNOWN RECALL ALERT",
+      "exportPath": "/Users/Kyle_1/deal-pipeline/pipeline/output/2026-04-10/renders/unknown-unknown-recall-alert.svg",
+      "sourceUrl": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxObm1qR3ZhVXJIM0cxZ3BMYXdJaHdLdnRUUllPZjFYV0FObkdJNWdvbnNKdHNsRXllRVJ6MVVKVWJ1Mm5hSnR4dERtYzU5ZlhQN1ZveEVFZjh5SWFzbmFVOVBQUlRNQ1BBazhlaUR3dmkxVkI3bEpWTU55WFBBZ3NKaDlYMWN4bVZXVWJXWDRRdk1teV9CcWRFc0FEeGQ1U3hSSzE0SnFaU1lsQQ?oc=5"
+    }
+  ]
+}

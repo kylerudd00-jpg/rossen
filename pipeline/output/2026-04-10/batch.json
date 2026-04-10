@@ -1,0 +1,44 @@
+{
+  "batchDate": "2026-04-10",
+  "ingestedCount": 30,
+  "cleanedCount": 5,
+  "selectedCount": 1,
+  "aiProvider": "heuristic-fallback",
+  "renderProvider": "local-svg",
+  "stories": [
+    {
+      "id": "recalls-https%3A%2F%2Fnews.google.com%2Frss%2Farticles%2FCBMiqgFBVV95cUxObm1qR3ZhVXJIM0cxZ3BMYXdJaHdLdnRUUllPZjFYV0FObkdJNWdvbnNKdHNsRXllRVJ6MVVKVWJ1Mm5hSnR4dERtYzU5ZlhQN1ZveEVFZjh5SWFzbmFVOVBQUlRNQ1BBazhlaUR3dmkxVkI3bEpWTU55WFBBZ3NKaDlYMWN4bVZXVWJXWDRRdk1teV9CcWRFc0FEeGQ1U3hSSzE0SnFaU1lsQQ%3Foc%3D5",
+      "title": "Safety in the food chain: Watchdog raises alarm over food recall process - investigatetv.com",
+      "sourceUrl": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxObm1qR3ZhVXJIM0cxZ3BMYXdJaHdLdnRUUllPZjFYV0FObkdJNWdvbnNKdHNsRXllRVJ6MVVKVWJ1Mm5hSnR4dERtYzU5ZlhQN1ZveEVFZjh5SWFzbmFVOVBQUlRNQ1BBazhlaUR3dmkxVkI3bEpWTU55WFBBZ3NKaDlYMWN4bVZXVWJXWDRRdk1teV9CcWRFc0FEeGQ1U3hSSzE0SnFaU1lsQQ?oc=5",
+      "sourceDomain": "news.google.com",
+      "publishedAt": "2026-04-08",
+      "rawSummary": "Safety in the food chain: Watchdog raises alarm over food recall process investigatetv.com",
+      "brand": "Unknown",
+      "category": "recall / warning",
+      "discoveryQuery": "Consumer recalls",
+      "stale": false,
+      "trusted": true,
+      "normalizedBrand": "Unknown",
+      "scores": {
+        "brandRecognition": 3,
+        "savingsClarity": 5,
+        "urgency": 9,
+        "scarcity": 4,
+        "oneSlidePotential": 9,
+        "emotionalPull": 8,
+        "massMarketRelevance": 5,
+        "confidenceFactualClarity": 8
+      },
+      "weightedTotal": 6.23,
+      "selected": true,
+      "summary1Sentence": "Safety in the food chain: Watchdog raises alarm over food recall process investigatetv.com",
+      "finalHeadline": "UNKNOWN RECALL ALERT",
+      "finalSubtext": "check packaging and store notices",
+      "imageQuery": "Unknown recall / warning",
+      "whySelected": "High one-slide potential with a strong consumer-facing angle for Unknown.",
+      "renderProvider": "local-svg",
+      "exportPath": "/Users/Kyle_1/deal-pipeline/pipeline/output/2026-04-10/renders/unknown-unknown-recall-alert.svg",
+      "exportUrl": "/Users/Kyle_1/deal-pipeline/pipeline/output/2026-04-10/renders/unknown-unknown-recall-alert.svg"
+    }
+  ]
+}

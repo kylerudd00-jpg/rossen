@@ -1,0 +1,796 @@
+import { useEffect, useMemo, useState } from "react";
+import "./App.css";
+import { brandVisuals } from "./data/brandVisuals";
+
+// ─── Canvas export ────────────────────────────────────────────────────────────
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    image.src = url;
+  });
+}
+
+function drawCoverImage(context, image, width, height) {
+  const sourceRatio = image.width / image.height;
+  const targetRatio = width / height;
+  let drawWidth = width;
+  let drawHeight = height;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (sourceRatio > targetRatio) {
+    drawHeight = height;
+    drawWidth = height * sourceRatio;
+    offsetX = (width - drawWidth) / 2;
+  } else {
+    drawWidth = width;
+    drawHeight = width / sourceRatio;
+    offsetY = (height - drawHeight) / 2;
+  }
+
+  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+}
+
+function triggerDownload(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+function createFilename(story) {
+  return `${story.brand}-${story.text.replaceAll("\n", "-").replace(/[^A-Z0-9-]+/gi, "-").toLowerCase()}.png`;
+}
+
+function hasRenderableLogo(logo) {
+  return Boolean(logo?.enabled && (logo.imageUrl || logo.label));
+}
+
+function resolveLogoVisibility(logo, headlineText) {
+  if (!hasRenderableLogo(logo)) return false;
+  const normalized = headlineText.toLowerCase();
+  switch (logo.mode) {
+    case "overlay":
+      return true;
+    case "conditional":
+      return /(gift cards|coming back|recall|alert|trade in|limited time)/.test(normalized);
+    case "in-image-ok":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function getLogoPlacementStyle(logo) {
+  switch (logo?.placement) {
+    case "top-left":
+      return { top: "18px", left: "18px", right: "auto", transform: "none" };
+    case "top-right":
+      return { top: "18px", left: "auto", right: "18px", transform: "none" };
+    default:
+      return { top: "18px", left: "50%", right: "auto", transform: "translateX(-50%)" };
+  }
+}
+
+function drawRoundedRect(context, x, y, width, height, radius) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+}
+
+function drawLogoLabel(context, story, width) {
+  const logo = story.logo;
+  if (!logo?.label) return false;
+
+  const paddingX = 44;
+  const paddingY = 24;
+  const badgeY = 68;
+  const fontSize = Math.min(88, Math.max(54, Math.round(width * 0.03)));
+  context.font = `900 ${fontSize}px Arial Black, Arial, sans-serif`;
+  const textWidth = context.measureText(logo.label).width;
+  const badgeWidth = Math.min(width * 0.86, textWidth + paddingX * 2);
+  const badgeHeight = fontSize + paddingY * 2;
+  const badgeX = (width - badgeWidth) / 2;
+
+  drawRoundedRect(context, badgeX, badgeY, badgeWidth, badgeHeight, 36);
+  context.fillStyle = logo.backgroundColor;
+  context.fill();
+
+  if (logo.borderColor) {
+    context.lineWidth = 3;
+    context.strokeStyle = logo.borderColor;
+    context.stroke();
+  }
+
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = logo.textColor;
+  context.shadowColor = "rgba(0, 0, 0, 0)";
+  context.fillText(logo.label, width / 2, badgeY + badgeHeight / 2 + 2);
+  return true;
+}
+
+async function drawLogoLayer(context, story, width, showLogo) {
+  if (!showLogo || !hasRenderableLogo(story.logo)) return;
+
+  if (story.logo.imageUrl) {
+    try {
+      const logoImage = await loadImage(story.logo.imageUrl);
+      const maxLogoWidth = width * story.logo.scale;
+      const maxLogoHeight = story.logo.maxHeight * (width / 2160);
+      const ratio = Math.min(maxLogoWidth / logoImage.width, maxLogoHeight / logoImage.height, 1);
+      const logoWidth = logoImage.width * ratio;
+      const logoHeight = logoImage.height * ratio;
+      context.drawImage(logoImage, (width - logoWidth) / 2, 72, logoWidth, logoHeight);
+      return;
+    } catch (error) {
+      console.warn("Logo export image failed, falling back to label.", error);
+    }
+  }
+
+  drawLogoLabel(context, story, width);
+}
+
+async function downloadStoryImage(story, activeImage, showLogo) {
+  const width = 2160;
+  const height = 2700;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas rendering is unavailable.");
+
+  context.fillStyle = "#111827";
+  context.fillRect(0, 0, width, height);
+
+  if (activeImage) {
+    try {
+      const background = await loadImage(activeImage);
+      drawCoverImage(context, background, width, height);
+    } catch {
+      console.warn("Background image export fell back to a dark canvas.");
+    }
+  }
+
+  const gradient = context.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 0.04)");
+  gradient.addColorStop(0.36, "rgba(0, 0, 0, 0.14)");
+  gradient.addColorStop(0.62, "rgba(0, 0, 0, 0.48)");
+  gradient.addColorStop(0.78, "rgba(0, 0, 0, 0.84)");
+  gradient.addColorStop(1, "rgba(0, 0, 0, 0.97)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, width, height);
+
+  await drawLogoLayer(context, story, width, showLogo);
+
+  const lines = story.text.split("\n").filter(Boolean);
+  if (lines.length === 0) throw new Error("There is no headline text to export.");
+
+  const maxTextWidth = width - 180;
+  let fontSize = 210;
+  while (fontSize > 110) {
+    context.font = `900 ${fontSize}px Arial Black, Arial, sans-serif`;
+    const widestLine = Math.max(...lines.map((line) => context.measureText(line).width));
+    if (widestLine <= maxTextWidth) break;
+    fontSize -= 8;
+  }
+
+  const lineHeight = fontSize * 0.94;
+  const totalTextHeight = lineHeight * lines.length;
+  const textBottom = height - 96;
+  const textTop = textBottom - totalTextHeight;
+  const dividerY = textTop - 54;
+
+  context.fillStyle = "rgba(255, 255, 255, 0.82)";
+  context.fillRect(108, dividerY, width - 216, 3);
+
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.fillStyle = "#ffffff";
+  context.shadowColor = "rgba(0, 0, 0, 0.62)";
+  context.shadowBlur = 28;
+  context.shadowOffsetY = 8;
+  context.font = `900 ${fontSize}px Arial Black, Arial, sans-serif`;
+
+  lines.forEach((line, index) => {
+    context.fillText(line, width / 2, textTop + index * lineHeight);
+  });
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("PNG export failed.");
+  triggerDownload(blob, createFilename(story));
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+
+// ─── Rule-based headline formatter ───────────────────────────────────────────
+// Produces BRAND / DEAL / URGENCY in poster style when no AI key is available.
+
+function escRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripBrand(text, brand) {
+  // Remove brand name and common suffixes like "USA", "Inc", "Corp"
+  const variants = [brand, brand.replace(/[^a-z0-9 ]/gi, " ").trim()].filter(Boolean);
+  let out = text;
+  for (const v of variants) {
+    out = out.replace(new RegExp(`\\b${escRe(v)}\\b`, "gi"), "");
+  }
+  return out.replace(/\b(usa|inc|corp|llc|co)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
+const VERB_FILLER =
+  /\b(is offering|will offer|has announced|announced|introduces?|launches?|unveils?|reveals?|now offering|are offering|has launched|have launched|to offer|to launch|to introduce|gives?|provides?|says?|reports?|confirms?|plans? to|set to|looks to|aims? to)\b/gi;
+
+const CONNECTOR_FILLER =
+  /\b(customers?|shoppers?|members?|consumers?|you|people)\s+(can|will|may|might|should)\b/gi;
+
+function stripFiller(text) {
+  return text
+    .replace(VERB_FILLER, "")
+    .replace(CONNECTOR_FILLER, "")
+    .replace(/\b(effective|beginning on|kicking off|limited time only|while supplies last|at participating locations?|via app|in(-|\s)store)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+// Extract first price mention: $4.99, $100, 50% off, half off
+function extractPrice(text) {
+  const m = text.match(/\$[\d,]+(?:\.\d{2})?|\d+(?:\.\d+)?%\s*off|\bhalf\s+off\b/i);
+  return m ? m[0].toUpperCase() : null;
+}
+
+// Extract date/deadline: "through April 28", "ends April 12", "starting April 21"
+function extractDeadline(text) {
+  const m = text.match(
+    /\b(through|until|thru|ends?\s+(?:on)?|starting|starts?\s+(?:on)?|on|by)\s+((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,?\s*\d{4})?)/i
+  );
+  return m ? m[0].toUpperCase() : null;
+}
+
+// Trim a phrase to max N words, clean punctuation
+function trimWords(text, n) {
+  return text
+    .replace(/[,;:–—]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, n)
+    .join(" ")
+    .trim();
+}
+
+function formatHeadlineText(title, brand) {
+  const up = (s) => s.toUpperCase();
+  const brandLine = up(brand);
+
+  // 1. Strip brand and filler from title to get the core news
+  let core = stripFiller(stripBrand(title, brand));
+
+  // 2. Detect headline type and build lines accordingly
+
+  // RECALL
+  if (/\brecall\b/i.test(title)) {
+    const item = trimWords(core.replace(/\brecall\w*/gi, ""), 3);
+    return [brandLine, item ? `${up(item)} RECALLED` : "RECALL", "ALERT"].filter(Boolean).join("\n");
+  }
+
+  // BOGO / buy one get one
+  if (/buy one[,\s]+get one|bogo/i.test(title)) {
+    const item = core.replace(/buy one[,\s]+get one(\s+free)?|bogo(\s+free)?/gi, "").trim();
+    const line2 = item ? `BOGO ${up(trimWords(item, 2))}` : "BOGO DEAL";
+    const line3 = extractDeadline(title) ?? extractPrice(title) ?? "";
+    return [brandLine, line2, line3].filter(Boolean).join("\n");
+  }
+
+  // STORE OPENING / COMEBACK / RETURNING
+  if (/grand opening|opening soon|new stores?|coming soon/i.test(title)) {
+    const countM = title.match(/(\d[\d,]*)\s+new\s+stores?/i);
+    const line2 = countM ? `${countM[1]} NEW STORES` : "GRAND OPENING";
+    const line3 = extractDeadline(title) ?? "";
+    return [brandLine, line2, line3].filter(Boolean).join("\n");
+  }
+
+  if (/making a comeback|coming back|returns?|reopening/i.test(title)) {
+    return [brandLine, "IS COMING BACK", extractDeadline(title) ?? ""].filter(Boolean).join("\n");
+  }
+
+  // STORE CLOSING
+  if (/\bclosing\b|\bshutting\b|\bbankruptcy\b/i.test(title)) {
+    return [brandLine, "STORE CLOSING", extractDeadline(title) ?? ""].filter(Boolean).join("\n");
+  }
+
+  // PRICE CUT / SALE on N items
+  const itemCountM = title.match(/(\d[\d,]+)\s+(items?|products?|things?|styles?)/i);
+  if (itemCountM && /price|cut|lower|reduc|cheaper|sale|off|discount/i.test(title)) {
+    return [brandLine, `PRICES CUT ON`, `${itemCountM[1].toUpperCase()} ITEMS`].join("\n");
+  }
+
+  // CLEARANCE / PERCENT OFF
+  const pctM = title.match(/(\d+)\s*%\s*(?:to\s*\d+\s*%\s*)?off/i);
+  if (pctM) {
+    const pct = `${pctM[0].toUpperCase()}`;
+    const subject = up(trimWords(core.replace(/\d+\s*%\s*(?:to\s*\d+\s*%)?\s*off/gi, ""), 3));
+    return [brandLine, subject || "CLEARANCE SALE", pct].filter(Boolean).join("\n");
+  }
+
+  // PRICE DEAL ($X something)
+  const price = extractPrice(title);
+  if (price) {
+    const subject = up(trimWords(core.replace(/\$[\d,.]+/g, ""), 3));
+    const deadline = extractDeadline(title);
+    return [brandLine, subject || "DEAL", `${price}${deadline ? `\n${deadline}` : ""}`]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  // FREE item deal
+  if (/\bfree\b/i.test(title)) {
+    const item = up(trimWords(core.replace(/\bfree\b/gi, ""), 3));
+    const deadline = extractDeadline(title) ?? "";
+    return [brandLine, item ? `FREE ${item}` : "FREE DEAL", deadline].filter(Boolean).join("\n");
+  }
+
+  // GIFT CARD
+  if (/gift\s+card/i.test(title)) {
+    const action = /trade.?in/i.test(title) ? "TRADE IN FOR GIFT CARDS" : "GIFT CARD DEAL";
+    return [brandLine, action, extractDeadline(title) ?? ""].filter(Boolean).join("\n");
+  }
+
+  // LAST RESORT: strip filler, take first 5-6 words, split into 2 lines
+  const words = up(stripFiller(core)).split(/\s+/).filter(Boolean).slice(0, 7);
+  const mid = Math.ceil(words.length / 2);
+  const line2 = words.slice(0, mid).join(" ");
+  const line3 = words.slice(mid).join(" ");
+  return [brandLine, line2, line3].filter(Boolean).join("\n");
+}
+
+function imageQueryFor(brand) {
+  const restaurants = new Set(["SUBWAY", "MCDONALD'S", "TACO BELL", "WENDY'S", "CHURCH'S", "POTBELLY"]);
+  const type = restaurants.has(brand) ? "restaurant exterior" : "store exterior";
+  const name = brand.toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim();
+  return `${name} ${type}`;
+}
+
+function candidateToHeadline(candidate) {
+  return {
+    localId: `${candidate.id}-${Math.random().toString(36).slice(2)}`,
+    storyId: candidate.id,
+    brand: candidate.brand,
+    status: "unreviewed",
+    // Use AI-rewritten headline if present, otherwise fall back to rule-based formatter
+    text: candidate.headline ?? formatHeadlineText(candidate.title, candidate.brand),
+    sourceName: candidate.sourceDomain,
+    sourceTitle: candidate.title,
+    sourceUrl: candidate.sourceUrl,
+    publishedAt: candidate.publishedAt,
+    context: candidate.rawSummary,
+  };
+}
+
+async function apiFetchStories() {
+  const response = await fetch("/api/stories");
+  if (!response.ok) throw new Error(`Stories fetch failed: ${response.status}`);
+  const candidates = await response.json();
+  return candidates.map(candidateToHeadline);
+}
+
+async function apiFetchImages(brand) {
+  const q = encodeURIComponent(imageQueryFor(brand));
+  const response = await fetch(`/api/images?q=${q}`);
+  if (!response.ok) return [];
+  return response.json();
+}
+
+function buildPost(headline, imageUrl, allImages) {
+  const visual = brandVisuals[headline.brand] ?? brandVisuals.DEFAULT;
+  const headlineText = `${headline.brand} ${headline.text}`.toLowerCase();
+  const resolvedLogo = {
+    ...(visual.logo ?? brandVisuals.DEFAULT.logo),
+    canRender: hasRenderableLogo(visual.logo),
+    initialVisible: resolveLogoVisibility(visual.logo, headlineText),
+  };
+
+  return {
+    ...headline,
+    imageUrl,
+    imageCandidates: allImages,
+    logo: resolvedLogo,
+  };
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+function HeadlineCard({ item, onTextChange, onStatusChange, onSubmitDecision, submitDisabled }) {
+  return (
+    <article className="headline-card">
+      <div className="headline-card-top">
+        <div className="headline-brand">{item.brand}</div>
+        <div className={`headline-status status-${item.status}`}>{item.status}</div>
+      </div>
+      <textarea
+        value={item.text}
+        onChange={(event) => onTextChange(item.localId, event.target.value.toUpperCase())}
+        rows={4}
+      />
+      <div className="headline-source">
+        <div className="source-meta">
+          <strong>{item.sourceName}</strong>
+          <span>{item.publishedAt}</span>
+        </div>
+        <a href={item.sourceUrl} target="_blank" rel="noreferrer">
+          {item.sourceTitle}
+        </a>
+        <p className="headline-context">{item.context}</p>
+      </div>
+      <div className="headline-actions">
+        <button
+          type="button"
+          className={item.status === "approved" ? "selected-action" : ""}
+          onClick={() => onStatusChange(item.localId, "approved")}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          className={item.status === "held" ? "selected-action" : "secondary-button"}
+          onClick={() => onStatusChange(item.localId, "held")}
+        >
+          Hold
+        </button>
+        <button
+          type="button"
+          className={item.status === "denied" ? "selected-action" : "secondary-button"}
+          onClick={() => onStatusChange(item.localId, "denied")}
+        >
+          Deny
+        </button>
+      </div>
+      <button
+        type="button"
+        className="submit-headline-button"
+        onClick={() => onSubmitDecision(item.localId)}
+        disabled={submitDisabled}
+      >
+        Submit
+      </button>
+    </article>
+  );
+}
+
+function ImagePicker({ brand, images, selectedIndex, onSelect, onConfirm, onSkip, isLoading }) {
+  const activeImage = images[selectedIndex];
+
+  return (
+    <article className="image-picker-card">
+      <div className="headline-card-top">
+        <div className="headline-brand">{brand}</div>
+        <div className="headline-status status-unreviewed">pick image</div>
+      </div>
+
+      {isLoading ? (
+        <div className="image-picker-loading">Searching for photos…</div>
+      ) : images.length === 0 ? (
+        <div className="image-picker-loading">No photos found.</div>
+      ) : (
+        <div className="image-picker-preview-wrap">
+          <img className="image-picker-preview" src={activeImage} alt={`Option ${selectedIndex + 1}`} />
+          <div className="image-picker-nav">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onSelect(Math.max(0, selectedIndex - 1))}
+              disabled={selectedIndex === 0}
+            >
+              ‹ Prev
+            </button>
+            <span className="image-picker-count">
+              {selectedIndex + 1} / {images.length}
+            </span>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => onSelect(Math.min(images.length - 1, selectedIndex + 1))}
+              disabled={selectedIndex === images.length - 1}
+            >
+              Next ›
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="headline-actions" style={{ marginTop: "12px" }}>
+        <button type="button" className="selected-action" onClick={() => onConfirm(activeImage ?? "")}>
+          Use This Image
+        </button>
+        <button type="button" className="secondary-button" onClick={onSkip}>
+          Skip Image
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function ProductCard({ story }) {
+  const [imageIndex, setImageIndex] = useState(0);
+  const [imageExhausted, setImageExhausted] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showLogo, setShowLogo] = useState(Boolean(story.logo?.initialVisible));
+  const [logoImageFailed, setLogoImageFailed] = useState(false);
+
+  const lines = story.text.split("\n");
+  const activeImage = imageExhausted ? "" : story.imageCandidates?.[imageIndex] ?? story.imageUrl;
+  const logoPlacementStyle = getLogoPlacementStyle(story.logo);
+  const shouldShowLogoImage = showLogo && story.logo?.imageUrl && !logoImageFailed;
+  const shouldShowLogoLabel = showLogo && story.logo?.label && (!story.logo?.imageUrl || logoImageFailed);
+
+  function handleImageError() {
+    setImageIndex((current) => {
+      const nextIndex = current + 1;
+      if (nextIndex < (story.imageCandidates?.length ?? 0)) return nextIndex;
+      setImageExhausted(true);
+      return current;
+    });
+  }
+
+  async function handleDownload() {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      await downloadStoryImage(story, activeImage, showLogo);
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
+  return (
+    <article className="product-card">
+      <div className="product-canvas">
+        {activeImage ? (
+          <img className="product-image" src={activeImage} alt={story.brand} onError={handleImageError} />
+        ) : (
+          <div className="product-image product-image-fallback" aria-hidden="true" />
+        )}
+        <div className="product-overlay" />
+        {showLogo && story.logo?.canRender ? (
+          <div
+            className={`product-logo-shell ${shouldShowLogoLabel ? "logo-shell-badge" : ""}`}
+            style={{
+              ...logoPlacementStyle,
+              background: shouldShowLogoLabel ? story.logo.backgroundColor : "transparent",
+              borderColor: shouldShowLogoLabel ? story.logo.borderColor : "transparent",
+              color: story.logo.textColor,
+            }}
+          >
+            {shouldShowLogoImage ? (
+              <img
+                className="product-logo"
+                src={story.logo.imageUrl}
+                alt={`${story.brand} logo`}
+                onError={() => setLogoImageFailed(true)}
+              />
+            ) : null}
+            {shouldShowLogoLabel ? <div className="product-wordmark">{story.logo.label}</div> : null}
+          </div>
+        ) : null}
+        <div className="product-divider" />
+        <div className="headline-stack">
+          {lines.map((line, index) => (
+            <div key={`${line}-${index}`}>{line}</div>
+          ))}
+        </div>
+      </div>
+      <div className="product-controls">
+        {story.logo?.canRender ? (
+          <button type="button" className="download-post-button" onClick={() => setShowLogo((c) => !c)}>
+            {showLogo ? "Hide Logo" : "Show Logo"}
+          </button>
+        ) : null}
+        <button type="button" className="download-post-button" onClick={handleDownload} disabled={isDownloading}>
+          {isDownloading ? "Preparing PNG…" : "Download High-Res PNG"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [headlines, setHeadlines] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [isLoadingStories, setIsLoadingStories] = useState(false);
+  const [storiesError, setStoriesError] = useState("");
+
+  // imagePicker: null | { localId, headline, brand, images, selectedIndex, isLoading }
+  const [imagePicker, setImagePicker] = useState(null);
+
+  const approvedCount = useMemo(() => headlines.filter((h) => h.status === "approved").length, [headlines]);
+  const heldCount = useMemo(() => headlines.filter((h) => h.status === "held").length, [headlines]);
+  const unreviewedCount = useMemo(() => headlines.filter((h) => h.status === "unreviewed").length, [headlines]);
+
+  async function loadStories() {
+    setIsLoadingStories(true);
+    setStoriesError("");
+    try {
+      const held = headlines.filter((h) => h.status === "held");
+      const usedIds = new Set([...held.map((h) => h.storyId), ...posts.map((p) => p.storyId)]);
+      const fresh = await apiFetchStories();
+      const filtered = fresh.filter((h) => !usedIds.has(h.storyId));
+      const needed = Math.max(0, 5 - held.length);
+      setHeadlines([...held, ...filtered.slice(0, needed)]);
+    } catch {
+      setStoriesError("Could not load stories — make sure the dev server is running.");
+    } finally {
+      setIsLoadingStories(false);
+    }
+  }
+
+  useEffect(() => {
+    loadStories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleHeadlineTextChange(localId, value) {
+    setHeadlines((current) => current.map((h) => (h.localId === localId ? { ...h, text: value } : h)));
+  }
+
+  function handleHeadlineStatusChange(localId, status) {
+    setHeadlines((current) => current.map((h) => (h.localId === localId ? { ...h, status } : h)));
+  }
+
+  async function handleSubmitDecision(localId) {
+    const headline = headlines.find((h) => h.localId === localId);
+    if (!headline || headline.status === "unreviewed" || headline.status === "held") return;
+
+    // Remove from headline queue
+    setHeadlines((current) => current.filter((h) => h.localId !== localId));
+
+    if (headline.status === "denied") return;
+
+    if (headline.status === "approved") {
+      // Open image picker in loading state, store full headline so we can build the post later
+      setImagePicker({ localId, headline, brand: headline.brand, images: [], selectedIndex: 0, isLoading: true });
+
+      const images = await apiFetchImages(headline.brand).catch(() => []);
+      setImagePicker((current) =>
+        current?.localId === localId ? { ...current, images, isLoading: false } : current
+      );
+    }
+  }
+
+  function handleImageConfirm(imageUrl) {
+    if (!imagePicker) return;
+    const post = buildPost(imagePicker.headline, imageUrl, imagePicker.images);
+    setPosts((current) => [post, ...current]);
+    setImagePicker(null);
+  }
+
+  function handleImageSkip() {
+    if (!imagePicker) return;
+    const post = buildPost(imagePicker.headline, "", []);
+    setPosts((current) => [post, ...current]);
+    setImagePicker(null);
+  }
+
+  const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  return (
+    <div className="generator-shell">
+      <header className="generator-header">
+        <div>
+          <p className="eyebrow">Deal Pipeline</p>
+          <h1>Headline Review &amp; Post Generation</h1>
+          <p className="subtitle">
+            Live consumer news pulled from the web. Edit the headline, approve it, pick a photo, and download your Instagram post.
+          </p>
+        </div>
+        <div className="header-actions">
+          <button type="button" className="secondary-button" onClick={loadStories} disabled={isLoadingStories}>
+            {isLoadingStories ? "Loading…" : "Refresh Headlines"}
+          </button>
+        </div>
+      </header>
+
+      <section className="stats-row">
+        <article className="stat-card">
+          <div className="stat-label">Date</div>
+          <div className="stat-value">{today}</div>
+        </article>
+        <article className="stat-card">
+          <div className="stat-label">Headlines</div>
+          <div className="stat-value">{headlines.length}</div>
+        </article>
+        <article className="stat-card">
+          <div className="stat-label">Unreviewed</div>
+          <div className="stat-value">{unreviewedCount}</div>
+        </article>
+        <article className="stat-card">
+          <div className="stat-label">Approved</div>
+          <div className="stat-value">{approvedCount}</div>
+        </article>
+        <article className="stat-card">
+          <div className="stat-label">Held</div>
+          <div className="stat-value">{heldCount}</div>
+        </article>
+        <article className="stat-card">
+          <div className="stat-label">Posts</div>
+          <div className="stat-value">{posts.length}</div>
+        </article>
+      </section>
+
+      {storiesError ? <div className="error-banner">{storiesError}</div> : null}
+
+      <section className="workflow-grid">
+        <div className="column-block">
+          <div className="section-header">
+            <h2>1. Review Headlines</h2>
+            <p>Edit copy, approve, hold, or deny. Submit when ready — approved ones move to image selection.</p>
+          </div>
+          <div className="headline-grid">
+            {isLoadingStories && headlines.length === 0 ? (
+              <div className="empty-state">Searching the web for consumer news…</div>
+            ) : headlines.length > 0 ? (
+              headlines.map((headline) => (
+                <HeadlineCard
+                  key={headline.localId}
+                  item={headline}
+                  onTextChange={handleHeadlineTextChange}
+                  onStatusChange={handleHeadlineStatusChange}
+                  onSubmitDecision={handleSubmitDecision}
+                  submitDisabled={headline.status === "unreviewed" || headline.status === "held"}
+                />
+              ))
+            ) : (
+              <div className="empty-state">No headlines. Click Refresh Headlines to pull in more stories.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="column-block">
+          <div className="section-header">
+            <h2>2. Pick Image &amp; Generate Post</h2>
+            <p>Choose a background photo for each approved headline. Your finished post will appear below.</p>
+          </div>
+
+          {imagePicker ? (
+            <ImagePicker
+              brand={imagePicker.brand}
+              images={imagePicker.images}
+              selectedIndex={imagePicker.selectedIndex}
+              onSelect={(index) =>
+                setImagePicker((current) => (current ? { ...current, selectedIndex: index } : current))
+              }
+              onConfirm={handleImageConfirm}
+              onSkip={handleImageSkip}
+              isLoading={imagePicker.isLoading}
+            />
+          ) : null}
+
+          <div className="products-grid">
+            {posts.length > 0 ? (
+              posts.map((story) => <ProductCard key={story.localId} story={story} />)
+            ) : !imagePicker ? (
+              <div className="empty-state">Approve a headline and pick an image to generate your first post.</div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
