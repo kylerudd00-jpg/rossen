@@ -108,16 +108,18 @@ export async function fetchWikipediaThumbnail(brandName) {
   return pages.flatMap((p) => (p.thumbnail?.source ? [p.thumbnail.source] : []));
 }
 
-// aiQuery: AI-generated search string (preferred). Falls back to "<Brand> store exterior".
+// aiQuery: AI-generated search string used for Google/Brave only.
+// Commons and Wikipedia always use the brand name — deal-specific queries find nothing there.
 export async function searchImagesForBrand(brand, env = {}, aiQuery = null) {
   const { GOOGLE_API_KEY: googleKey, GOOGLE_CSE_ID: cseId, BRAVE_API_KEY: braveKey } = env;
   const titleCase = brandToTitleCase(brand);
-  const query = aiQuery || `${titleCase} store exterior`;
+  const brandQuery = `${titleCase} store exterior`;
+  const searchQuery = aiQuery || brandQuery;
 
   const results = await Promise.allSettled([
-    googleKey && cseId ? fetchGoogleImages(query, googleKey, cseId) : Promise.resolve([]),
-    braveKey           ? fetchBraveImages(query, braveKey)          : Promise.resolve([]),
-    fetchCommonsImages(query),
+    googleKey && cseId ? fetchGoogleImages(searchQuery, googleKey, cseId) : Promise.resolve([]),
+    braveKey           ? fetchBraveImages(searchQuery, braveKey)          : Promise.resolve([]),
+    fetchCommonsImages(brandQuery),
     fetchWikipediaThumbnail(titleCase),
   ]);
 

@@ -33,29 +33,14 @@ function drawCoverImage(ctx, img, w, h) {
   ctx.drawImage(img, ox, oy, dw, dh);
 }
 
-function wrapText(ctx, text, maxWidth) {
-  if (ctx.measureText(text).width <= maxWidth) return [text];
-  const words = text.split(" ");
-  const out = [];
-  let current = "";
-  for (const word of words) {
-    const test = current ? `${current} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && current) {
-      out.push(current);
-      current = word;
-    } else {
-      current = test;
-    }
-  }
-  if (current) out.push(current);
-  return out.length ? out : [text];
-}
-
 async function renderPost(post, { width = 1080, height = 1350 } = {}) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 
   ctx.fillStyle = "#111111";
   ctx.fillRect(0, 0, width, height);
@@ -76,75 +61,63 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
-  const rawLines = (post.headline || "").split("\n").filter(Boolean);
-  if (rawLines.length === 0) return canvas;
+  const lines = (post.headline || "").split("\n").filter(Boolean).slice(0, 3);
+  if (lines.length === 0) return canvas;
 
   const FONT = "Anton, Impact, Arial Black, sans-serif";
-  const maxTextW = width - Math.round(width * 0.11);
+  const maxTextW = width * 0.86;
 
-  let brandSize = Math.round(width * 0.065);
-  ctx.font = `400 ${brandSize}px ${FONT}`;
-  while (brandSize > 36 && ctx.measureText(rawLines[0]).width > maxTextW) {
-    brandSize -= 2;
-    ctx.font = `400 ${brandSize}px ${FONT}`;
+  // Find the largest font size where every line fits on a single line — no wrapping ever
+  let fontSize = Math.round(width * 0.115);
+  while (fontSize > 28) {
+    ctx.font = `400 ${fontSize}px ${FONT}`;
+    if (lines.every((l) => ctx.measureText(l).width <= maxTextW)) break;
+    fontSize -= 2;
   }
 
-  let dealSize = Math.round(width * 0.085);
-  const rawDealLines = rawLines.slice(1);
-  if (rawDealLines.length > 0) {
-    while (dealSize > 40) {
-      ctx.font = `400 ${dealSize}px ${FONT}`;
-      const allWrapped = rawDealLines.flatMap((l) => wrapText(ctx, l, maxTextW));
-      if (allWrapped.every((l) => ctx.measureText(l).width <= maxTextW)) break;
-      dealSize -= 3;
-    }
-  }
-  ctx.font = `400 ${dealSize}px ${FONT}`;
-  const dealLines = rawDealLines.flatMap((l) => wrapText(ctx, l, maxTextW));
-
-  const brandLineH = brandSize * 1.1;
-  const dealLineH  = dealSize  * 1.08;
-  const bottomPad  = Math.round(height * 0.048);
-  const totalTextH = brandLineH + dealLines.length * dealLineH;
+  const lineH     = Math.round(fontSize * 1.13);
+  const bottomPad = Math.round(height * 0.048);
+  const totalTextH = lines.length * lineH;
   const textTop    = height - bottomPad - totalTextH;
 
-  const dividerPad = Math.round(height * 0.042);
+  // Divider + logo
+  const dividerPad = Math.round(height * 0.044);
   const dividerY   = textTop - dividerPad;
 
-  const logoImg  = logoResult.status === "fulfilled" ? logoResult.value : null;
-  const LOGO_H   = Math.round(width * 0.088);
-  const LOGO_W   = logoImg
+  const logoImg = logoResult.status === "fulfilled" ? logoResult.value : null;
+  const LOGO_H  = Math.round(width * 0.18);
+  const LOGO_W  = logoImg
     ? Math.round(LOGO_H * (logoImg.naturalWidth / logoImg.naturalHeight))
     : Math.round(LOGO_H * 1.43);
-  const logoX    = (width - LOGO_W) / 2;
-  const logoY    = dividerY - LOGO_H * 0.5;
-  const lineGap  = Math.round(width * 0.022);
+  const logoX   = (width - LOGO_W) / 2;
+  const logoY   = dividerY - LOGO_H * 0.5;
+  const lineGap = Math.round(width * 0.024);
 
   ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.75)";
-  ctx.lineWidth   = Math.max(2, width * 0.0022);
-  ctx.beginPath(); ctx.moveTo(Math.round(width * 0.065), dividerY); ctx.lineTo(logoX - lineGap, dividerY); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(logoX + LOGO_W + lineGap, dividerY); ctx.lineTo(Math.round(width * 0.935), dividerY); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.70)";
+  ctx.lineWidth   = Math.max(2, width * 0.002);
+  const lineL = Math.round(width * 0.065);
+  const lineR = Math.round(width * 0.935);
+  ctx.beginPath(); ctx.moveTo(lineL, dividerY); ctx.lineTo(logoX - lineGap, dividerY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(logoX + LOGO_W + lineGap, dividerY); ctx.lineTo(lineR, dividerY); ctx.stroke();
   ctx.restore();
 
   if (logoImg) ctx.drawImage(logoImg, logoX, logoY, LOGO_W, LOGO_H);
 
-  ctx.textAlign = "center";
+  ctx.textAlign    = "center";
   ctx.textBaseline = "top";
-
-  function drawLine(text, x, y, size) {
-    ctx.font        = `400 ${size}px ${FONT}`;
-    ctx.lineJoin    = "round";
-    ctx.lineWidth   = size * 0.075;
-    ctx.strokeStyle = "rgba(0,0,0,0.9)";
-    ctx.strokeText(text, x, y);
-    ctx.fillStyle   = "#ffffff";
-    ctx.fillText(text, x, y);
-  }
+  ctx.font         = `400 ${fontSize}px ${FONT}`;
 
   const cx = width / 2;
-  drawLine(rawLines[0], cx, textTop, brandSize);
-  dealLines.forEach((line, i) => drawLine(line, cx, textTop + brandLineH + i * dealLineH, dealSize));
+  lines.forEach((line, i) => {
+    const y = textTop + i * lineH;
+    ctx.lineJoin    = "round";
+    ctx.lineWidth   = fontSize * 0.07;
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+    ctx.strokeText(line, cx, y);
+    ctx.fillStyle   = "#ffffff";
+    ctx.fillText(line, cx, y);
+  });
 
   return canvas;
 }
@@ -155,21 +128,27 @@ function PostCard({ post }) {
   const [imageIdx, setImageIdx] = useState(0);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [rendering, setRendering] = useState(true);
-  const cancelRef = useRef(false);
+  const renderIdRef = useRef(0);
 
   const candidates = post.imageCandidates || [];
   const activeImage = candidates[imageIdx] || post.imageUrl || null;
 
   useEffect(() => {
-    cancelRef.current = false;
+    const id = ++renderIdRef.current;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRendering(true);
-    renderPost({ ...post, imageUrl: activeImage }, { width: 540, height: 675 }).then((canvas) => {
-      if (!cancelRef.current) {
-        setPreviewUrl(canvas.toDataURL("image/jpeg", 0.88));
+    const dpr = window.devicePixelRatio || 2;
+    renderPost({ ...post, imageUrl: activeImage }, { width: 540 * dpr, height: 675 * dpr })
+      .then((canvas) => {
+        if (renderIdRef.current !== id) return;
+        setPreviewUrl(canvas.toDataURL("image/png"));
         setRendering(false);
-      }
-    });
-    return () => { cancelRef.current = true; };
+      })
+      .catch(() => {
+        if (renderIdRef.current !== id) return;
+        setPreviewUrl(null);
+        setRendering(false);
+      });
   }, [post, activeImage]);
 
   async function handleDownload() {
@@ -192,6 +171,7 @@ function PostCard({ post }) {
       <div className="post-preview">
         {rendering && <div className="post-preview-loader"><span className="spinner" /></div>}
         {previewUrl && <img src={previewUrl} alt={post.brand} style={{ opacity: rendering ? 0 : 1 }} />}
+        {!rendering && !previewUrl && <div className="post-preview-error">Preview unavailable</div>}
         {candidates.length > 1 && (
           <button
             className="photo-cycle-btn"
@@ -221,7 +201,7 @@ function StoryCard({ story, selected, onToggle, disabled }) {
   return (
     <div className={`story-card-wrap ${selected ? "story-card-wrap--selected" : ""} ${disabled ? "story-card-wrap--disabled" : ""}`}>
       <label className="story-card-main">
-        <input type="checkbox" checked={selected} onChange={onToggle} disabled={disabled} />
+        <input className="visually-hidden" type="checkbox" checked={selected} onChange={onToggle} disabled={disabled} />
         <div className="story-card-body">
           <div className="story-brand">{story.brand}</div>
           <div className="story-title">{story.title}</div>
@@ -240,19 +220,21 @@ function StoryCard({ story, selected, onToggle, disabled }) {
           <button
             className={`story-preview-toggle ${previewOpen ? "story-preview-toggle--open" : ""}`}
             onClick={() => setPreviewOpen((v) => !v)}
+            aria-expanded={previewOpen}
+            aria-controls={`preview-${story.id}`}
           >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="8" cy="8" r="6.5"/>
               <path d="M8 7v4M8 5.5v.5"/>
             </svg>
             Source preview
-            <svg className="chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg aria-hidden="true" className="chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M1 1l4 4 4-4"/>
             </svg>
           </button>
 
           {previewOpen && (
-            <div className="story-preview-box">
+            <div className="story-preview-box" id={`preview-${story.id}`}>
               {story.rawSummary && (
                 <p className="preview-summary">{story.rawSummary}</p>
               )}
@@ -280,20 +262,41 @@ export default function App() {
   const [selected, setSelected] = useState(new Set());
   const [posts, setPosts] = useState([]);
   const [error, setError] = useState(null);
+  const [fetchProgress, setFetchProgress] = useState({ message: "", percent: 0 });
   const [genProgress, setGenProgress] = useState({ current: 0, total: 0, label: "" });
   const [lastFetched, setLastFetched] = useState(null);
 
   async function fetchStories() {
     setPhase("loading");
     setError(null);
+    setFetchProgress({ message: "Starting…", percent: 0 });
     try {
       const res = await fetch("/api/stories");
       if (!res.ok) throw new Error(`Stories fetch failed (${res.status})`);
-      const data = await res.json();
-      setStories(data);
-      setSelected(new Set());
-      setLastFetched(new Date());
-      setPhase("selecting");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "progress") {
+            setFetchProgress({ message: event.message, percent: event.percent });
+          } else if (event.type === "done") {
+            setStories(event.stories);
+            setSelected(new Set());
+            setLastFetched(new Date());
+            setPhase("selecting");
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+      }
     } catch (e) {
       setError(e.message);
       setPhase("idle");
@@ -319,7 +322,22 @@ export default function App() {
       const story = picks[i];
       setGenProgress({ current: i + 1, total: picks.length, label: story.brand });
 
-      const headline = story.headline || story.title.toUpperCase();
+      let headline = story.headline || "";
+      if (!headline || !headline.includes("\n")) {
+        try {
+          const r = await fetch("/api/headline", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ brand: story.brand, title: story.title, summary: story.rawSummary }),
+          });
+          if (r.ok) ({ headline } = await r.json());
+        } catch { /* will use brand-only fallback below */ }
+      }
+      if (!headline || !headline.includes("\n")) {
+        console.warn(`[generate] No valid headline for "${story.brand}", skipping`);
+        setGenProgress({ current: i + 1, total: picks.length, label: story.brand });
+        continue;
+      }
 
       let candidates = [];
       try {
@@ -375,15 +393,12 @@ export default function App() {
         {/* ── IDLE ── */}
         {phase === "idle" && (
           <div className="phase-idle">
-            {error && <div className="error-banner">{error}</div>}
             <div className="idle-hero">
-              <div className="idle-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/><path d="M12 6v6l4 2"/></svg>
-              </div>
-              <h1 className="idle-title">Daily Post Builder</h1>
-              <p className="idle-desc">Scans 40+ sources, filters for your audience, and writes ready-to-post headlines.</p>
+              {error && <div className="error-banner">{error}</div>}
+              <h1 className="idle-title">Today's Post Builder</h1>
+              <p className="idle-desc">Pulls today's deals, recalls, and consumer news from 40+ sources, picks the ones worth posting, and writes the headlines for you.</p>
               <button className="btn-fetch" onClick={fetchStories}>
-                Fetch Today's Stories
+                Get Today's Stories
               </button>
             </div>
           </div>
@@ -391,10 +406,23 @@ export default function App() {
 
         {/* ── LOADING ── */}
         {phase === "loading" && (
-          <div className="phase-center">
+          <div className="phase-center" aria-live="polite" aria-atomic="true">
             <div className="loading-ring" />
-            <p className="loading-title">Scanning sources…</p>
-            <p className="loading-sub">Checking 40+ feeds and filtering for your audience. Takes about 30 seconds.</p>
+            <p className="loading-title">{fetchProgress.message || "Starting…"}</p>
+            <div
+              className="fetch-progress-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={fetchProgress.percent}
+              aria-label="Loading progress"
+            >
+              <div
+                className="fetch-progress-fill"
+                style={{ width: `${fetchProgress.percent}%` }}
+              />
+            </div>
+            <p className="loading-sub">{fetchProgress.percent}%</p>
           </div>
         )}
 
@@ -408,9 +436,9 @@ export default function App() {
                   <span className="selection-pill-label">/ 5 selected</span>
                 </div>
                 <span className="selecting-hint">
-                  {selected.size === 0 && "Pick up to 5 stories to post today"}
-                  {selected.size > 0 && selected.size < 5 && `${5 - selected.size} more to go`}
-                  {selected.size === 5 && "Ready to generate!"}
+                  {selected.size === 0 && "Check up to 5 stories to turn into posts"}
+                  {selected.size > 0 && selected.size < 5 && `${5 - selected.size} more`}
+                  {selected.size === 5 && "Good to go"}
                 </span>
               </div>
               <div className="selecting-bar-right">
@@ -424,33 +452,53 @@ export default function App() {
               </div>
             </div>
 
-            <div className="story-grid">
-              {stories.map((story) => (
-                <StoryCard
-                  key={story.id}
-                  story={story}
-                  selected={selected.has(story.id)}
-                  onToggle={() => toggleStory(story.id)}
-                  disabled={!selected.has(story.id) && selected.size >= 5}
-                />
-              ))}
-            </div>
+            {(() => {
+              const selectable = stories.filter((s) => s.headline?.includes("\n"));
+              if (selectable.length === 0) {
+                return (
+                  <div className="empty-state">
+                    <p>No stories found for today. The pipeline may still be warming up, or all results were filtered out.</p>
+                    <button className="btn-fetch" onClick={fetchStories}>Try again</button>
+                  </div>
+                );
+              }
+              return (
+                <div className="story-grid">
+                  {selectable.map((story) => (
+                    <StoryCard
+                      key={story.id}
+                      story={story}
+                      selected={selected.has(story.id)}
+                      onToggle={() => toggleStory(story.id)}
+                      disabled={!selected.has(story.id) && selected.size >= 5}
+                    />
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
         {/* ── GENERATING ── */}
         {phase === "generating" && (
-          <div className="phase-center">
+          <div className="phase-center" aria-live="polite" aria-atomic="true">
             <div className="loading-ring" />
-            <p className="loading-title">Building posts…</p>
+            <p className="loading-title">Building your posts…</p>
             <p className="loading-sub">
-              Finding the best photo for <strong>{genProgress.label}</strong>
+              Finding a photo for <strong>{genProgress.label}</strong>
               &nbsp;({genProgress.current} of {genProgress.total})
             </p>
-            <div className="gen-progress-track">
+            <div
+              className="gen-progress-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round((genProgress.current / (genProgress.total || 1)) * 100)}
+              aria-label="Generation progress"
+            >
               <div
                 className="gen-progress-fill"
-                style={{ width: `${(genProgress.current / genProgress.total) * 100}%` }}
+                style={{ width: `${(genProgress.current / (genProgress.total || 1)) * 100}%` }}
               />
             </div>
           </div>
@@ -461,8 +509,8 @@ export default function App() {
           <div className="phase-done">
             <div className="done-bar">
               <div className="done-bar-left">
-                <h2 className="done-title">{posts.length} Posts Ready</h2>
-                <span className="done-sub">Click any image to cycle photos. Download when happy.</span>
+                <h2 className="done-title">{posts.length} posts ready</h2>
+                <span className="done-sub">Use the button on each image to try a different photo. Download the ones you want.</span>
               </div>
               <div className="done-bar-right">
                 <button className="btn-ghost" onClick={() => setPhase("selecting")}>← Back</button>
@@ -470,9 +518,16 @@ export default function App() {
               </div>
             </div>
 
-            <div className="posts-grid">
-              {posts.map((post) => <PostCard key={post.id} post={post} />)}
-            </div>
+            {posts.length === 0 ? (
+              <div className="empty-state">
+                <p>No posts could be generated from the selected stories.</p>
+                <button className="btn-ghost" onClick={() => setPhase("selecting")}>← Back</button>
+              </div>
+            ) : (
+              <div className="posts-grid">
+                {posts.map((post) => <PostCard key={post.id} post={post} />)}
+              </div>
+            )}
           </div>
         )}
 

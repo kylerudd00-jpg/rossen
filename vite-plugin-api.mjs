@@ -1,7 +1,8 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { fetchStories } from "./pipeline/lib/storyPipeline.mjs";
+import { fetchStories, writeHeadline } from "./pipeline/lib/storyPipeline.mjs";
 import { searchImagesForBrand } from "./pipeline/lib/imageSearch.mjs";
+import { gemini } from "./pipeline/lib/gemini.mjs";
 
 // Vite doesn't push .env into process.env for plugins — load it manually
 function loadDotEnv() {
@@ -28,13 +29,19 @@ export function apiPlugin() {
         const url = new URL(req.url, "http://localhost");
 
         if (url.pathname === "/api/stories") {
+          res.setHeader("Content-Type", "text/event-stream");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("Connection", "keep-alive");
+          const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
           try {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(await fetchStories()));
+            const stories = await fetchStories((message, percent) => {
+              send({ type: "progress", message, percent });
+            });
+            send({ type: "done", stories });
           } catch (e) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: e.message }));
+            send({ type: "error", message: e.message });
           }
+          res.end();
           return;
         }
 
@@ -44,26 +51,14 @@ export function apiPlugin() {
           if (!brand) { res.setHeader("Content-Type", "application/json"); res.end("[]"); return; }
           try {
             let aiQuery = null;
-            const groqKey = process.env.GROQ_API_KEY;
-            if (groqKey && headline) {
-              const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: { "content-type": "application/json", "authorization": `Bearer ${groqKey}` },
-                body: JSON.stringify({
-                  model: "llama-3.3-70b-versatile",
-                  temperature: 0,
-                  max_tokens: 32,
-                  messages: [
-                    { role: "system", content: "Write a 4-6 word Google Images search query to find a real exterior photo of the brand in this story. Be specific enough to avoid ambiguity — include the brand type (restaurant, retail store, pharmacy, etc.) if the name could be confused with something else. Return only the search query, no quotes, no explanation." },
-                    { role: "user", content: `Brand: ${brand}\nHeadline: ${headline}` },
-                  ],
-                }),
-                signal: AbortSignal.timeout(8000),
-              });
-              if (r.ok) {
-                const d = await r.json();
-                aiQuery = d.choices?.[0]?.message?.content?.trim() || null;
-              }
+            const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
+            if ((keys.geminiKey || keys.groqKey) && headline) {
+              aiQuery = await gemini(
+                "Write a 4-6 word Google Images search query to find a real exterior photo of the brand in this story. Be specific enough to avoid ambiguity — include the brand type (restaurant, retail store, pharmacy, etc.) if the name could be confused with something else. Return only the search query, no quotes, no explanation.",
+                `Brand: ${brand}\nHeadline: ${headline}`,
+                keys,
+                { maxTokens: 32 },
+              ).catch(() => null);
             }
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(await searchImagesForBrand(brand, process.env, aiQuery)));
@@ -74,20 +69,57 @@ export function apiPlugin() {
           return;
         }
 
-        if (url.pathname === "/api/proxy") {
-          const imageUrl = url.searchParams.get("url");
-          if (!imageUrl) { res.statusCode = 400; res.end(); return; }
+        if (url.pathname === "/api/headline") {
+          const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
+          if (!keys.geminiKey && !keys.groqKey) { res.statusCode = 503; res.end(JSON.stringify({ error: "No AI API key configured" })); return; }
           try {
-            const upstream = await fetch(imageUrl, {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const body = JSON.parse(Buffer.concat(chunks).toString());
+            const { brand, title, summary } = body;
+            if (!title) { res.statusCode = 400; res.end(JSON.stringify({ error: "title required" })); return; }
+            const headline = await writeHeadline({ brand: brand || "RETAIL", title, rawSummary: summary || title }, keys);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ headline }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: e.message }));
+          }
+          return;
+        }
+
+        if (url.pathname === "/api/proxy") {
+          const PRIVATE_RE = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|::1|0\.0\.0\.0)$/i;
+          const MAX_BYTES = 10 * 1024 * 1024;
+          const raw = url.searchParams.get("url");
+          if (!raw) { res.statusCode = 400; res.end(JSON.stringify({ error: "missing url param" })); return; }
+          let parsed;
+          try { parsed = new URL(raw); } catch { res.statusCode = 400; res.end(JSON.stringify({ error: "invalid URL" })); return; }
+          if (parsed.protocol !== "http:" && parsed.protocol !== "https:") { res.statusCode = 400; res.end(JSON.stringify({ error: "non-http scheme" })); return; }
+          if (PRIVATE_RE.test(parsed.hostname)) { res.statusCode = 400; res.end(JSON.stringify({ error: "private hostname" })); return; }
+          try {
+            const upstream = await fetch(raw, {
               headers: { "User-Agent": "Mozilla/5.0" },
               signal: AbortSignal.timeout(10000),
             });
-            if (!upstream.ok) { res.statusCode = upstream.status; res.end(); return; }
-            const contentType = upstream.headers.get("content-type") || "image/jpeg";
-            const buffer = await upstream.arrayBuffer();
+            if (!upstream.ok) { res.statusCode = 502; res.end(); return; }
+            const contentType = upstream.headers.get("content-type") || "";
+            if (!contentType.startsWith("image/")) {
+              upstream.body?.cancel();
+              res.statusCode = 415;
+              res.end(JSON.stringify({ error: "upstream is not an image" }));
+              return;
+            }
+            const chunks = [];
+            let total = 0;
+            for await (const chunk of upstream.body) {
+              total += chunk.length;
+              if (total > MAX_BYTES) { res.statusCode = 502; res.end(JSON.stringify({ error: "upstream too large" })); return; }
+              chunks.push(chunk);
+            }
             res.setHeader("Content-Type", contentType);
             res.setHeader("Cache-Control", "public, max-age=3600");
-            res.end(Buffer.from(buffer));
+            res.end(Buffer.concat(chunks));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));

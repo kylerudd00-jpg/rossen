@@ -1,6 +1,7 @@
 import { parseRssItems } from "./rss.mjs";
 import { summarizeText } from "./text.mjs";
 import { discoveryQueries } from "../config/discoveryQueries.mjs";
+import { gemini } from "./gemini.mjs";
 
 // ─── Brand detection ──────────────────────────────────────────────────────────
 
@@ -150,19 +151,35 @@ function toCandidate(item, sourceId, label, index) {
   const combined = `${item.title} ${item.rawSummary}`;
   let domain = item.sourceUrl;
   try { domain = new URL(item.sourceUrl).hostname.replace(/^www\./, ""); } catch {}
-  const date = item.publishedAt
-    ? new Date(item.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-    : new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const rawPubDate = item.publishedAt || null;
+  let displayDate;
+  try {
+    const d = new Date(rawPubDate);
+    displayDate = !rawPubDate || isNaN(d.getTime())
+      ? new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  } catch {
+    displayDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  }
   return {
     id: item.sourceUrl ? urlToId(item.sourceUrl) : `${sourceId}-${index}`,
     title: item.title,
     sourceUrl: item.sourceUrl,
     sourceDomain: domain,
-    publishedAt: date,
+    publishedAt: displayDate,
+    rawPubDate,
     rawSummary: summarizeText(item.rawSummary || item.title, 280),
     brand: inferBrand(combined),
     queryLabel: label,
   };
+}
+
+// Drop anything published more than 8 days ago — no expired deals
+function isRecent(rawPubDate, maxDays = 8) {
+  if (!rawPubDate) return true;
+  const d = new Date(rawPubDate);
+  if (isNaN(d.getTime())) return true; // unparseable = let through
+  return (Date.now() - d.getTime()) < maxDays * 24 * 60 * 60 * 1000;
 }
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
@@ -247,6 +264,8 @@ function preFilter(candidates) {
   return candidates.filter((c) => {
     const text = `${c.title} ${c.rawSummary}`.toLowerCase();
 
+    // Hard date cutoff — nothing older than 8 days
+    if (!isRecent(c.rawPubDate)) return false;
     // Hard kill — definitively off-topic
     if (HARD_SKIP.some((p) => p.test(text))) return false;
     // Must be a recognized brand
@@ -268,60 +287,84 @@ function preFilter(candidates) {
     brandCount[c.brand] = bc + 1;
 
     return true;
-  }).slice(0, 15); // 15 candidates — small batch prevents token overrun and word-scrambling
+  }).slice(0, 25);
 }
 
 // ─── Brave news search ────────────────────────────────────────────────────────
 
-const BRAVE_SEARCH_QUERIES = [
-  "consumer recall this week",
-  "CPSC recall May 2026",
-  "FDA recall May 2026",
-  "fast food deals this week",
-  "restaurant free food this week",
-  "food freebies May 2026",
-  "retail deals May 2026",
-  "consumer lawsuit hidden fees 2026",
-  "data breach customers 2026",
-  "misleading label lawsuit 2026",
-  "surveillance pricing lawsuit 2026",
-  "teacher appreciation deals 2026",
-  "nurses week deals 2026",
-  "Mother's Day deals 2026",
-  "free museum admission May 2026",
-  "Costco news this week",
-  "Walmart recall this week",
-  "Target deals this week",
-  "Amazon products recalled",
-];
+function braveQueries() {
+  const now = new Date();
+  const month = now.toLocaleString("en-US", { month: "long" });
+  const year = now.getFullYear();
+  const my = `${month} ${year}`;
+  return [
+    // New menu items & returning favorites
+    `restaurant "new menu" OR "new item" OR "launches" OR "debuts" ${my}`,
+    `"coming back" OR "returns to menu" OR "back permanently" restaurant ${my}`,
+    `fast food "limited edition" OR "themed menu" OR "collab" ${my}`,
+    // Free food & deals
+    `free food restaurant deal promotion ${my}`,
+    `"free" food "named" OR "nurses" OR "teachers" OR "military" restaurant ${my}`,
+    `"national" day free food restaurant deal ${my}`,
+    `"free taco" OR "free burger" OR "free pizza" OR "free sandwich" ${my}`,
+    `BOGO OR "buy one get one" restaurant fast food ${my}`,
+    `"$1" OR "$2" OR "$3" meal deal restaurant fast food ${my}`,
+    // Brand-specific
+    `McDonald's new deal promotion launch ${my}`,
+    `Starbucks deal BOGO free promotion ${my}`,
+    `Costco deal new item price change ${my}`,
+    `Chipotle Popeyes "Burger King" "Shake Shack" deal promotion ${my}`,
+    `"Red Lobster" OR "Olive Garden" OR "Applebee's" deal promo ${my}`,
+    // Recalls & safety
+    `FDA CPSC recall consumer food product safety ${my}`,
+    `food recall contamination salmonella allergy warning ${my}`,
+    // Store & service news
+    `"store closing" OR bankruptcy OR "going out of business" retail ${year}`,
+    `"price increase" OR "membership fee" OR "now free" major brand ${my}`,
+    `"new partnership" OR "now delivers" OR "available on" brand store ${my}`,
+    // Seasonal
+    `"Mother's Day" free food deal restaurant ${year}`,
+    `"nurses week" OR "teacher appreciation" free deal restaurant ${year}`,
+  ];
+}
 
 async function fetchBraveNews(apiKey) {
+  const queries = braveQueries();
+  // Run in batches of 10 to avoid rate limits
   const allItems = [];
-  // Run a sample of queries concurrently (cap at 6 to avoid rate limits)
-  const queries = BRAVE_SEARCH_QUERIES.slice(0, 6);
-  const results = await Promise.allSettled(
-    queries.map(async (q) => {
-      const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=5&freshness=pw`;
-      const res = await fetch(url, {
-        headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": apiKey },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.results || []).map((item, i) => toCandidate(
-        {
-          title: item.title,
-          sourceUrl: item.url,
-          publishedAt: item.age || null,
-          rawSummary: item.description || item.title,
-        },
-        `brave-${q.slice(0, 20)}`,
-        `Brave: ${q}`,
-        i,
-      ));
-    })
-  );
-  results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
+  for (let i = 0; i < queries.length; i += 10) {
+    const batch = queries.slice(i, i + 10);
+    const results = await Promise.allSettled(
+      batch.map(async (q) => {
+        const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=5&freshness=pw`;
+        const res = await fetch(url, {
+          headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": apiKey },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.results || []).map((item, i) => toCandidate(
+          {
+            title: item.title,
+            sourceUrl: item.url,
+            // Brave "age" can be "3 hours ago" (unparseable) or an ISO string.
+            // If it can't be parsed as a date, substitute today — freshness=pw
+            // already guarantees results are ≤7 days old.
+            publishedAt: (() => {
+              if (!item.age) return null;
+              const d = new Date(item.age);
+              return isNaN(d.getTime()) ? new Date().toISOString() : item.age;
+            })(),
+            rawSummary: item.description || item.title,
+          },
+          `brave-${q.slice(0, 20)}`,
+          `Brave: ${q}`,
+          i,
+        ));
+      })
+    );
+    results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
+  }
   return allItems;
 }
 
@@ -332,115 +375,90 @@ async function fetchAllSources(env = {}) {
   const results = await Promise.allSettled([
     fetchGoogleNews(3),
     braveKey ? fetchBraveNews(braveKey) : Promise.resolve([]),
-    fetchFeed("slickdeals",    "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1", "Slickdeals",          12),
-    fetchFeed("dealnews",      "https://dealnews.com/featured/rss.xml",                                                    "DealNews",            10),
-    fetchFeed("brads-deals",   "https://www.bradsdeals.com/blog/feed/",                                                    "Brad's Deals",         8),
-    fetchFeed("dealsplus",     "https://www.dealsplus.com/rss",                                                            "DealsPlus",            8),
-    fetchFeed("woot",          "https://deals.woot.com/rss",                                                               "Woot",                 8),
-    fetchFeed("hip2save",      "https://hip2save.com/feed/",                                                               "Hip2Save",            12),
-    fetchFeed("krazy-coupon",  "https://thekrazycouponlady.com/feed",                                                      "Krazy Coupon Lady",   10),
-    fetchFeed("money-mom",     "https://moneysavingmom.com/feed/",                                                         "Money Saving Mom",    10),
-    fetchFeed("living-rich",   "https://www.livingrichwithcoupons.com/feed/",                                              "Living Rich",          8),
-    fetchFeed("hunt4freebies", "https://www.hunt4freebies.com/feed/",                                                      "Hunt4Freebies",       10),
-    fetchFeed("freebieshark",  "https://www.freebieshark.com/feed/",                                                       "FreebieSHARK",        10),
-    fetchFeed("freeflys",      "https://freeflys.com/feed/",                                                               "Freeflys",            10),
-    fetchFeed("freebies2deals","https://www.freebies2deals.com/feed/",                                                     "Freebies2Deals",      10),
-    fetchFeed("totally-free",  "https://www.totallyfreestuff.com/rss.asp",                                                 "Totally Free Stuff",  10),
-    fetchFeed("freebie-guy",   "https://www.thefreebieguy.com/feed/",                                                      "The Freebie Guy",     10),
-    fetchFeed("lord-savings",  "https://lordofsavings.com/feed/",                                                          "Lord of Savings",     10),
-    fetchFeed("stretching",    "https://stretchingabuck.com/feed/",                                                        "Stretching a Buck",    8),
-    fetchFeed("southern",      "https://www.southernsavers.com/feed/",                                                     "Southern Savers",      8),
-    fetchFeed("passion",       "https://www.passionforsavings.com/feed/",                                                  "Passion for Savings",  8),
-    fetchFeed("saving-simple", "https://savingsaidsimply.com/feed/",                                                       "Saving Said Simply",   8),
-    fetchFeed("saving-dollars","https://savingdollarsandsense.com/feed/",                                                  "Saving Dollars",       8),
-    fetchFeed("iheart-publix", "https://www.iheartpublix.com/feed/",                                                       "I Heart Publix",       8),
-    fetchFeed("penny-hoarder", "https://www.thepennyhoarder.com/feed/",                                                    "The Penny Hoarder",    8),
-    fetchFeed("clark-howard",  "https://clark.com/feed/",                                                                  "Clark Howard",         8),
-    fetchFeed("retailmenot",   "https://www.retailmenot.com/blog/feed",                                                    "RetailMeNot Blog",     8),
-    fetchFeed("thestreet",     "https://www.thestreet.com/rss/news.rss",                                                   "The Street",           8),
-    fetchFeed("retail-dive",   "https://www.retaildive.com/feeds/news/",                                                   "Retail Dive",          8),
-    fetchFeed("grocery-dive",  "https://www.grocerydive.com/feeds/news/",                                                  "Grocery Dive",         8),
-    fetchFeed("qsr-mag",       "https://www.qsrmagazine.com/rss.xml",                                                     "QSR Magazine",         8),
-    fetchFeed("rest-business", "https://www.restaurantbusinessonline.com/rss.xml",                                        "Restaurant Business",  8),
-    fetchFeed("nrn",           "https://www.nrn.com/rss.xml",                                                             "Nation's Restaurant News", 8),
-    fetchFeed("supermarket-news","https://www.supermarketnews.com/rss/news",                                               "Supermarket News",     6),
-    fetchFeed("reddit-deals",  "https://www.reddit.com/r/deals/hot.rss?limit=15",                                         "r/deals",             10),
-    fetchFeed("reddit-frugal", "https://www.reddit.com/r/frugal/hot.rss?limit=15",                                        "r/frugal",             8),
-    fetchFeed("reddit-free",   "https://www.reddit.com/r/freebies/hot.rss?limit=15",                                      "r/freebies",          12),
-    fetchFeed("reddit-coupon", "https://www.reddit.com/r/coupons/hot.rss?limit=10",                                       "r/coupons",            8),
-    fetchFeed("reddit-efree",  "https://www.reddit.com/r/eFreebies/hot.rss?limit=10",                                     "r/eFreebies",          8),
-    // ── Fast food & restaurant deal news ──────────────────────────────────────
-    fetchFeed("brand-eating",  "https://www.brandeating.com/feeds/posts/default",                                         "Brand Eating",        12),
-    fetchFeed("chew-boom",     "https://www.chewboom.com/feed/",                                                          "Chew Boom",           12),
-    fetchFeed("fast-food-post","https://www.fastfoodpost.com/feed/",                                                      "Fast Food Post",      10),
+    // ── High-quality consumer news outlets ────────────────────────────────────
+    fetchFeed("people-food",   "https://people.com/food/feed/",                               "People Food",         15),
+    fetchFeed("people-shop",   "https://people.com/shopping/feed/",                           "People Shopping",     10),
+    fetchFeed("today-food",    "https://feeds.today.com/rss/food",                            "Today Food",          10),
+    fetchFeed("delish",        "https://www.delish.com/rss/all.xml",                          "Delish",              10),
+    fetchFeed("eater",         "https://www.eater.com/rss/index.xml",                         "Eater",               10),
+    fetchFeed("good-house",    "https://www.goodhousekeeping.com/food-news/rss/",             "Good Housekeeping",    8),
+    // ── Restaurant & fast food news ───────────────────────────────────────────
+    fetchFeed("brand-eating",  "https://www.brandeating.com/feeds/posts/default",             "Brand Eating",        15),
+    fetchFeed("chew-boom",     "https://www.chewboom.com/feed/",                              "Chew Boom",           15),
+    fetchFeed("fast-food-post","https://www.fastfoodpost.com/feed/",                          "Fast Food Post",      12),
+    // ── Consumer deals & advocacy ─────────────────────────────────────────────
+    fetchFeed("clark-howard",  "https://clark.com/feed/",                                     "Clark Howard",        10),
+    fetchFeed("penny-hoarder", "https://www.thepennyhoarder.com/feed/",                       "The Penny Hoarder",   10),
+    fetchFeed("hip2save",      "https://hip2save.com/feed/",                                  "Hip2Save",            12),
+    fetchFeed("slickdeals",    "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1", "Slickdeals", 12),
+    fetchFeed("dealnews",      "https://dealnews.com/featured/rss.xml",                       "DealNews",            10),
+    fetchFeed("retailmenot",   "https://www.retailmenot.com/blog/feed",                       "RetailMeNot Blog",     8),
+    fetchFeed("krazy-coupon",  "https://thekrazycouponlady.com/feed",                         "Krazy Coupon Lady",   10),
   ]);
   return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }
 
-// ─── AI headline rewriter ─────────────────────────────────────────────────────
+// ─── Combined filter + headline (single AI call) ─────────────────────────────
 
-// ─── Pass 1: relevance filter ─────────────────────────────────────────────────
+const COMBINED_PROMPT = `You are a consumer news researcher and copywriter for a Facebook/Instagram page targeting viewers age 50+ (many age 75+).
 
-const FILTER_PROMPT = `You are the content curator for a Facebook/Instagram consumer news page targeting viewers age 50+ (many 75+).
+You receive a JSON array of recent news articles. In ONE pass: pick the best ones AND write the Instagram headline for each.
 
-You will receive a JSON array of articles. For each one, decide: is this worth posting as a single-slide graphic?
+PICK IT if it's one of these:
+1. Big brand deals: free food, BOGO, $1 deals, free items, rewards/app deals, teacher/nurse/military/senior appreciation, holiday promos
+2. Consumer alerts: food or product recalls — burn, choking, poisoning, contamination, injury, fire, vision loss
+3. Brand news people care about: new menu items, returning favorites, price changes, store closings, membership changes, policy changes
+4. Consumer controversy: hidden fees, surveillance pricing, misleading labels, data breaches, class action lawsuits
+5. Free events: free admission, free store classes, free workshops
 
-POST IT if it fits one of these categories:
+PRIORITIZE: Costco, Walmart, Target, Amazon, McDonald's, Starbucks, Chipotle, Chick-fil-A, Taco Bell, Burger King, Subway, Wendy's, Domino's, Pizza Hut, Popeyes, Shake Shack, Red Lobster, Applebee's, Olive Garden, Dairy Queen, Dunkin', Krispy Kreme, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Disney+, Netflix
 
-1. BIG BRAND DEALS: free food, BOGO, $1 deals, free items with purchase, rewards member offers, teacher/nurse/senior/military appreciation deals, holiday or seasonal promos, deals active for several days or weeks
-2. CONSUMER ALERTS: recalls involving household products, food safety, child safety — especially burn, choking, poisoning, contamination, injury, fire, or vision-loss risks; "check your pantry/medicine cabinet/home" stories
-3. BRAND NEWS PEOPLE CAN USE: new menu items, famous deals changing, major company rule changes, rewards changes, pricing changes, delivery or return policy changes, store access/membership changes
-4. CONSUMER CONTROVERSY: hidden fees, AI pricing, surveillance pricing, misleading labels, fake discounts, data breaches, scam ads, overcharge claims, lawsuits involving recognizable companies
-5. FREE LOCAL-STYLE NATIONAL EVENTS: free museum admission, kids workshops, free store events, free classes, teen summer passes, free collectibles
+SKIP IT if: expired deal, vague/no brand, coupon code, how-to listicle, B2B industry news, hyperlocal
 
-PRIORITIZE these brands: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Cinnabon, Firehouse Subs, Insomnia Cookies, Raising Cane's, Whataburger, Olive Garden, Applebee's, Red Lobster, TGI Fridays, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Panera, JetBlue, Delta, United, Southwest, Uber, DoorDash, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness, LEGO
+HEADLINE FORMAT for each picked story — 3 plain-English phrases, one per JSON field:
+- "brand": the brand name in ALL CAPS (e.g. "CHIPOTLE"). Multi-retailer recall/sale: "AMAZON / WALMART / TARGET"
+- "offer": 3–7 words, the core deal/news hook. Specific product/price/action. No punctuation. Lowercase.
+- "detail": 2–6 words, the key condition/date/location. No punctuation. Lowercase. Empty string "" if nothing concrete.
 
-SKIP IT if:
-✗ Vague trend with no specific brand, product, price, or date
-✗ Expired deal
-✗ Tiny niche coupon code or weak discount
-✗ Complicated antitrust story with no clear consumer impact
-✗ How-to / tips / listicle content
-✗ No clear consumer impact for everyday people
-✗ Hyperlocal story unless it involves a very recognizable national brand
+RULES:
+- Use exact prices, products, and dates from the article — never invent
+- Never repeat the brand name in offer or detail
+- For recalls: name the exact product and danger plainly ("possible salmonella risk" not "health concerns")
+- For lawsuits: "lawsuit claims" / "accused of" — never state allegations as fact
+- For deals with no specific end date: use "" for detail rather than guessing
 
-If multiple articles cover the exact same deal, mark only the best-sourced one as relevant.
+EXAMPLES:
+"McDonald's launches Stranger Things Happy Meal on May 5th"
+→ {"id":"...","brand":"MCDONALD'S","offer":"stranger things happy meal","detail":"launches may 5th"}
 
-FINAL CHECK: Ask yourself — "Would a 65-year-old understand this instantly and care enough to click, share, or save it?" Only mark relevant:true if yes.
+"Chipotle testing $2.50 tacos through June 2nd at select Tampa/Orlando/KC locations"
+→ {"id":"...","brand":"CHIPOTLE","offer":"2.50 tacos","detail":"through june 2nd select locations"}
 
-Return ONLY a JSON array, one entry per input item, no other text:
-[{"id":"...","relevant":true},{"id":"...","relevant":false}]`;
+"Red Lobster brings back Endless Shrimp after bankruptcy"
+→ {"id":"...","brand":"RED LOBSTER","offer":"endless shrimp is back","detail":"for a limited time"}
 
-async function filterRelevance(candidates, apiKey) {
-  const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      temperature: 0,
-      max_tokens: 32768,
-      messages: [
-        { role: "system", content: FILTER_PROMPT },
-        { role: "user", content: JSON.stringify(payload) },
-      ],
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!res.ok) throw new Error(`Groq filter ${res.status}`);
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("No JSON in filter response");
-  return JSON.parse(match[0]);
-}
+"Firehouse Subs giving free subs to anyone named Mike on May 6th only"
+→ {"id":"...","brand":"FIREHOUSE SUBS","offer":"free subs for people named mike","detail":"may 6th only"}
 
-// ─── Pass 2: fact extractor — AI extracts raw facts, code formats them ────────
+"Shake Shack free burger weekly in May with any $10+ purchase"
+→ {"id":"...","brand":"SHAKE SHACK","offer":"free burgers every week","detail":"with 10 dollar plus purchase all may"}
+
+"Thermos recalling 8.2 million jars after vision loss injuries"
+→ {"id":"...","brand":"THERMOS","offer":"8.2 million jars recalled","detail":"vision loss injuries reported"}
+
+"Costco updating $1.50 hot dog combo — water now an option"
+→ {"id":"...","brand":"COSTCO","offer":"1.50 hot dog combo updated","detail":"water now an option"}
+
+Return ONLY a JSON array of the stories you picked (max 12). Empty array [] if nothing qualifies. No other text.
+[{"id":"...","brand":"...","offer":"...","detail":"..."}, ...]`;
+
+// ─── Headline formatter (used by pipeline + /api/headline endpoint) ───────────
 
 const EXTRACT_PROMPT = `You write on-image headline text for a consumer news Facebook/Instagram page targeting viewers age 50+ (many 75+).
 
 Given an article, extract two plain-English phrases that will become lines 2 and 3 of a 3-line ALL CAPS graphic headline. Line 1 is always the brand name (handled separately).
 
+- "brand": line 1 — the brand name(s) in ALL CAPS. If one brand, just that name (e.g. "CHIPOTLE"). If a product is sold or recalled at multiple major retailers, list up to 3 separated by " / " (e.g. "AMAZON / WALMART / TARGET"). Use the shortest recognizable form.
 - "offer": line 2 — the core deal, alert, or news hook in 3–7 words. No punctuation, no caps. Be specific — use the exact product name, price, or action. Never vague.
 - "detail": line 3 — the key condition, date, location, or context in 2–6 words. No punctuation, no caps. Use exact dates when available. Empty string if nothing meaningful to add.
 
@@ -451,10 +469,25 @@ LINE BREAK RULES (critical):
 
 STYLE RULES:
 - Be blunt and specific. Name the exact product/price/danger
-- For recalls: name the exact product and danger (e.g. "possible salmonella risk" not "health concerns")
-- For lawsuits: use "lawsuit claims" / "accused of" / "state claims" — never state allegations as proven
+- For recalls: name the exact product and danger in plain language (e.g. "possible salmonella risk" not "health concerns"); include where sold if relevant
+- For lawsuits: use "lawsuit claims" / "accused of" / "state claims" / "customers report" — NEVER state allegations as proven
 - For safety: reference the authority when relevant (e.g. "cpsc says stop using" / "fda warning issued")
-- Avoid: "prices are rising" / "stores are changing" / "consumers are upset" / "limited time" (use real dates)
+- For deals: include exact dates, purchase requirement, app/rewards/ID requirement, "select locations" when applicable
+- Avoid: "prices are rising" / "stores are changing" / "consumers are upset" / "limited time" unless no better date exists
+- NEVER repeat the brand name in offer or detail — it is already on line 1
+- NEVER invent facts, dates, or conditions not in the article
+- If there is no meaningful detail (no date, location, or condition), return an empty string for detail — do NOT pad with "available now" or "at participating locations" unless the article says so
+
+BAD vs GOOD EXAMPLES:
+
+Bad: {"offer": "chocolate products recall", "detail": "allergy risk"}
+Good: {"offer": "hot cocoa mixes recalled", "detail": "possible salmonella risk"}
+
+Bad: {"offer": "ticket prices changing", "detail": "travelers may pay more"}
+Good: {"offer": "sued for surveillance pricing", "detail": "fares may change based on your data"}
+
+Bad: {"offer": "2.50", "detail": "tacos through june 2nd"}
+Good: {"offer": "2.50 tacos", "detail": "through june 2nd at select locations"}
 
 EXAMPLES (showing offer → detail pairs):
 
@@ -479,122 +512,110 @@ Article: "Bank of America cardholders get free admission to 150+ museums May 2nd
 Article: "Firehouse Subs is giving free subs to anyone named Mike on May 6th only"
 → {"offer": "free subs for people named mike", "detail": "may 6th only"}
 
-Only use facts from the article. Return ONLY valid JSON, no other text: {"offer":"...","detail":"..."}`;
+Article: "Costco is updating the $1.50 hot dog combo — water is now an option instead of soda"
+→ {"offer": "1.50 hot dog combo updated", "detail": "water now an option"}
 
-// Format the AI-extracted facts into a clean 3-line headline
+Article: "Instacart is ending AI pricing tests after a Consumer Reports investigation"
+→ {"offer": "ends ai pricing tests", "detail": "after consumer reports investigation"}
+
+Only use facts from the article. Return ONLY valid JSON, no other text: {"brand":"...","offer":"...","detail":"..."}`;
+
 function formatHeadlineFromFacts(brand, offer, detail) {
   const up = (s) => s.toUpperCase().trim();
 
-  // Clean up common spoken-English artifacts from the AI output
-  const cleanOffer = offer
+  const normalize = (s) => s
     .replace(/\b(\d+)\s+dollars?\b/gi, "$$1")
     .replace(/\bjust\s+(\d)/gi, "$$1")
-    .trim();
-  const cleanDetail = detail
-    .replace(/\b(\d+)\s+dollars?\b/gi, "$$1")
-    .replace(/\bjust\s+(\d)/gi, "$$1")
+    .replace(/\s{2,}/g, " ")
     .trim();
 
-  const offerUp = up(cleanOffer);
-  const detailUp = up(cleanDetail);
+  // Only strip the brand name from offer/detail if the result is still non-empty
+  const brandEscaped = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const brandRe = new RegExp(`^\\s*${brandEscaped}\\s*$`, "i");
 
-  // Try to split a long offer line at a natural break point
-  // so it reads as two clean lines instead of one crowded line
-  const SPLIT_AT = ["GET ONE FREE", "GET ONE", "FOR A YEAR", "FOR FREE", "FOR LIFE", "OR FREE", "AND GET", "PLUS FREE"];
-  let line2 = offerUp;
-  let line3 = detailUp || null;
+  const offerClean = normalize(offer);
+  const detailClean = normalize(detail);
 
-  if (offerUp.length > 22) {
-    for (const pivot of SPLIT_AT) {
-      const idx = offerUp.indexOf(pivot);
-      if (idx > 0) {
-        // Put what comes before the pivot on line2, the pivot itself starts line3
-        const before = offerUp.slice(0, idx).trim();
-        const after = offerUp.slice(idx).trim();
-        if (before && after) {
-          line2 = before;
-          line3 = detailUp ? `${after}\n${detailUp}` : after;
-          break;
-        }
-      }
-    }
-  }
+  // Drop offer/detail only if it's SOLELY the brand name repeated — not if brand appears mid-phrase
+  const offerUp = brandRe.test(offerClean) ? "" : up(offerClean);
+  const detailUp = brandRe.test(detailClean) ? "" : up(detailClean);
 
-  const lines = [up(brand), line2, line3].filter(Boolean);
+  const lines = [up(brand), offerUp || null, detailUp || null].filter(Boolean);
   return lines.join("\n");
 }
 
-async function writeHeadline(candidate, apiKey) {
+export async function writeHeadline(candidate, keys) {
   const article = `Title: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "content-type": "application/json", "authorization": `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      temperature: 0,
-      max_tokens: 32768,
-      messages: [
-        { role: "system", content: EXTRACT_PROMPT },
-        { role: "user", content: article },
-      ],
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`Groq headline ${res.status}`);
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
+  const text = await gemini(EXTRACT_PROMPT, article, keys, { maxTokens: 300 });
   const match = text.match(/\{[\s\S]*?\}/);
   if (!match) throw new Error("No JSON in headline response");
-  const { offer, detail } = JSON.parse(match[0]);
+  const { brand, offer, detail } = JSON.parse(match[0]);
   if (!offer) throw new Error("Empty offer in headline response");
-  return formatHeadlineFromFacts(candidate.brand, offer, detail || "");
+  const headline = formatHeadlineFromFacts(brand || candidate.brand, offer, detail || "");
+  if (!headline.includes("\n")) throw new Error("Headline collapsed to single line");
+  return headline;
 }
 
-async function filterAndRewriteWithAI(candidates, apiKey) {
-  // Pass 1: batch relevance filter (cheap — just yes/no per story)
-  const filterResults = await filterRelevance(candidates, apiKey);
-  const approved = candidates.filter((c) => {
-    const r = filterResults.find((item) => item.id === c.id);
-    return r?.relevant === true;
-  });
-  console.log(`[pipeline] AI approved ${approved.length} / ${candidates.length} candidates`);
+async function filterAndRewriteWithAI(candidates, keys, progress) {
+  progress("Reading today's stories…", 40);
+  const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
+  const text = await gemini(COMBINED_PROMPT, JSON.stringify(payload), keys, { maxTokens: 3000 });
+  progress("Formatting headlines…", 80);
 
-  // Pass 2: write each headline individually (focused call = no word scrambling)
-  const withHeadlines = await Promise.all(
-    approved.map(async (c) => {
-      try {
-        const headline = await writeHeadline(c, apiKey);
-        return { ...c, headline };
-      } catch (e) {
-        console.warn(`[pipeline] Headline failed for "${c.title}":`, e.message);
-        return null;
-      }
-    })
-  );
-  return withHeadlines.filter(Boolean);
+  const match = text.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error("No JSON array in AI response");
+  const picked = JSON.parse(match[0]);
+  if (!Array.isArray(picked)) throw new Error("AI response was not an array");
+
+  const withHeadlines = [];
+  for (const item of picked) {
+    const candidate = candidates.find((c) => c.id === item.id);
+    if (!candidate || !item.offer) continue;
+    try {
+      const headline = formatHeadlineFromFacts(item.brand || candidate.brand, item.offer, item.detail || "");
+      if (!headline.includes("\n")) continue;
+      withHeadlines.push({ ...candidate, headline });
+    } catch (e) {
+      console.warn(`[pipeline] Headline format failed for "${candidate.title}":`, e.message);
+    }
+  }
+  console.log(`[pipeline] AI picked ${withHeadlines.length} / ${candidates.length} candidates`);
+  return withHeadlines;
 }
 
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
-export async function fetchStories() {
+let _cache = null;
+let _cacheAt = 0;
+const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
+
+export async function fetchStories(progress = () => {}) {
+  if (_cache && Date.now() - _cacheAt < CACHE_TTL) {
+    progress("Loading today's stories…", 100);
+    return _cache;
+  }
+
+  progress("Scanning news feeds…", 5);
   const all = await fetchAllSources(process.env);
+  progress(`Scanning ${all.length} articles — picking the best ones…`, 30);
   const candidates = preFilter(all);
   console.log(`[pipeline] ${all.length} raw → ${candidates.length} after pre-filter`);
 
-  const apiKey = process.env.GROQ_API_KEY;
-  if (apiKey) {
+  const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
+  if (keys.geminiKey || keys.groqKey) {
     try {
-      console.log(`[pipeline] Sending ${candidates.length} candidates to AI for relevance + rewrite…`);
-      const results = await filterAndRewriteWithAI(candidates, apiKey);
-      console.log(`[pipeline] AI approved ${results.length} stories`);
+      const results = await filterAndRewriteWithAI(candidates, keys, progress);
+      progress(`Done — ${results.length} stories ready`, 100);
+      console.log(`[pipeline] ${results.length} stories with headlines`);
+      _cache = results;
+      _cacheAt = Date.now();
       return results;
     } catch (e) {
-      console.warn("[pipeline] AI filter failed, returning pre-filtered candidates:", e.message);
+      throw new Error(`AI pipeline failed: ${e.message}`);
     }
   }
 
-  // Fallback if no API key — return pre-filtered candidates without headlines
-  return candidates.slice(0, 20);
+  throw new Error("No AI API key configured — add GEMINI_API_KEY or GROQ_API_KEY to .env");
 }
 
 // ─── Image search ─────────────────────────────────────────────────────────────
