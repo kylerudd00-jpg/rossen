@@ -271,11 +271,67 @@ function preFilter(candidates) {
   }).slice(0, 15); // 15 candidates — small batch prevents token overrun and word-scrambling
 }
 
+// ─── Brave news search ────────────────────────────────────────────────────────
+
+const BRAVE_SEARCH_QUERIES = [
+  "consumer recall this week",
+  "CPSC recall May 2026",
+  "FDA recall May 2026",
+  "fast food deals this week",
+  "restaurant free food this week",
+  "food freebies May 2026",
+  "retail deals May 2026",
+  "consumer lawsuit hidden fees 2026",
+  "data breach customers 2026",
+  "misleading label lawsuit 2026",
+  "surveillance pricing lawsuit 2026",
+  "teacher appreciation deals 2026",
+  "nurses week deals 2026",
+  "Mother's Day deals 2026",
+  "free museum admission May 2026",
+  "Costco news this week",
+  "Walmart recall this week",
+  "Target deals this week",
+  "Amazon products recalled",
+];
+
+async function fetchBraveNews(apiKey) {
+  const allItems = [];
+  // Run a sample of queries concurrently (cap at 6 to avoid rate limits)
+  const queries = BRAVE_SEARCH_QUERIES.slice(0, 6);
+  const results = await Promise.allSettled(
+    queries.map(async (q) => {
+      const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=5&freshness=pw`;
+      const res = await fetch(url, {
+        headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": apiKey },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.results || []).map((item, i) => toCandidate(
+        {
+          title: item.title,
+          sourceUrl: item.url,
+          publishedAt: item.age || null,
+          rawSummary: item.description || item.title,
+        },
+        `brave-${q.slice(0, 20)}`,
+        `Brave: ${q}`,
+        i,
+      ));
+    })
+  );
+  results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
+  return allItems;
+}
+
 // ─── All sources ──────────────────────────────────────────────────────────────
 
-async function fetchAllSources() {
+async function fetchAllSources(env = {}) {
+  const braveKey = env.BRAVE_API_KEY;
   const results = await Promise.allSettled([
     fetchGoogleNews(3),
+    braveKey ? fetchBraveNews(braveKey) : Promise.resolve([]),
     fetchFeed("slickdeals",    "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1", "Slickdeals",          12),
     fetchFeed("dealnews",      "https://dealnews.com/featured/rss.xml",                                                    "DealNews",            10),
     fetchFeed("brads-deals",   "https://www.bradsdeals.com/blog/feed/",                                                    "Brad's Deals",         8),
@@ -325,30 +381,32 @@ async function fetchAllSources() {
 
 // ─── Pass 1: relevance filter ─────────────────────────────────────────────────
 
-const FILTER_PROMPT = `You are the content curator for a major Instagram deal page with 500k+ followers.
+const FILTER_PROMPT = `You are the content curator for a Facebook/Instagram consumer news page targeting viewers age 50+ (many 75+).
 
-You will receive a JSON array of articles. For each one, decide: is this worth posting?
+You will receive a JSON array of articles. For each one, decide: is this worth posting as a single-slide graphic?
 
-POST IT if it is a specific, actionable deal that everyday shoppers care about:
-✓ BOGO at a major chain
-✓ Free specific item or free food event
-✓ Unusually low price (e.g. 67¢ burgers, $1 menu items)
-✓ Real dollar savings on something popular (e.g. Vitamix $100 off at Costco)
-✓ Bundle deal with clear value
-✓ Time-limited offer with a date
-✓ Consumer recall people need to act on
-✓ Major brand closing / bankruptcy
-✓ Annual freebie event (Free Cone Day, Tax Day deals, National food days)
-✓ 30%+ off at a store everyone shops at
+POST IT if it fits one of these categories:
+
+1. BIG BRAND DEALS: free food, BOGO, $1 deals, free items with purchase, rewards member offers, teacher/nurse/senior/military appreciation deals, holiday or seasonal promos, deals active for several days or weeks
+2. CONSUMER ALERTS: recalls involving household products, food safety, child safety — especially burn, choking, poisoning, contamination, injury, fire, or vision-loss risks; "check your pantry/medicine cabinet/home" stories
+3. BRAND NEWS PEOPLE CAN USE: new menu items, famous deals changing, major company rule changes, rewards changes, pricing changes, delivery or return policy changes, store access/membership changes
+4. CONSUMER CONTROVERSY: hidden fees, AI pricing, surveillance pricing, misleading labels, fake discounts, data breaches, scam ads, overcharge claims, lawsuits involving recognizable companies
+5. FREE LOCAL-STYLE NATIONAL EVENTS: free museum admission, kids workshops, free store events, free classes, teen summer passes, free collectibles
+
+PRIORITIZE these brands: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Cinnabon, Firehouse Subs, Insomnia Cookies, Raising Cane's, Whataburger, Olive Garden, Applebee's, Red Lobster, TGI Fridays, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Panera, JetBlue, Delta, United, Southwest, Uber, DoorDash, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness, LEGO
 
 SKIP IT if:
-✗ Vague "brand is having a sale" with no specific item, price, or date
-✗ Random single-SKU product discount ($5 off a shoe)
-✗ Generic brand news with no consumer deal
+✗ Vague trend with no specific brand, product, price, or date
+✗ Expired deal
+✗ Tiny niche coupon code or weak discount
+✗ Complicated antitrust story with no clear consumer impact
 ✗ How-to / tips / listicle content
-✗ Niche audience deals
+✗ No clear consumer impact for everyday people
+✗ Hyperlocal story unless it involves a very recognizable national brand
 
-If multiple articles cover the exact same deal, mark only the best one as relevant.
+If multiple articles cover the exact same deal, mark only the best-sourced one as relevant.
+
+FINAL CHECK: Ask yourself — "Would a 65-year-old understand this instantly and care enough to click, share, or save it?" Only mark relevant:true if yes.
 
 Return ONLY a JSON array, one entry per input item, no other text:
 [{"id":"...","relevant":true},{"id":"...","relevant":false}]`;
@@ -379,34 +437,49 @@ async function filterRelevance(candidates, apiKey) {
 
 // ─── Pass 2: fact extractor — AI extracts raw facts, code formats them ────────
 
-const EXTRACT_PROMPT = `You are a fact extractor for a deal alert page.
+const EXTRACT_PROMPT = `You write on-image headline text for a consumer news Facebook/Instagram page targeting viewers age 50+ (many 75+).
 
-Given an article about a consumer deal, extract two plain-English phrases:
-- "offer": the deal in plain words, 3–7 words, no punctuation, no caps
-- "detail": the most important supporting detail in 2–5 words — a price, date, condition, or how to get it. No punctuation, no caps.
+Given an article, extract two plain-English phrases that will become lines 2 and 3 of a 3-line ALL CAPS graphic headline. Line 1 is always the brand name (handled separately).
 
-Only use facts that appear in the article. If a detail is not mentioned, return an empty string for it.
+- "offer": line 2 — the core deal, alert, or news hook in 3–7 words. No punctuation, no caps. Be specific — use the exact product name, price, or action. Never vague.
+- "detail": line 3 — the key condition, date, location, or context in 2–6 words. No punctuation, no caps. Use exact dates when available. Empty string if nothing meaningful to add.
 
-Examples:
-Article: "Subway is running a buy one get one free deal on footlongs through Sunday"
-→ {"offer": "buy one footlong get one free", "detail": "through sunday"}
+LINE BREAK RULES (critical):
+- Each line must be a complete chunk of meaning
+- Never split a number from what it describes ("$2.50 tacos" stays together)
+- Never cut a phrase mid-thought
 
-Article: "Church's Chicken is selling an 8-piece meal for $4.99"
-→ {"offer": "8 piece chicken meal", "detail": "just 4.99"}
+STYLE RULES:
+- Be blunt and specific. Name the exact product/price/danger
+- For recalls: name the exact product and danger (e.g. "possible salmonella risk" not "health concerns")
+- For lawsuits: use "lawsuit claims" / "accused of" / "state claims" — never state allegations as proven
+- For safety: reference the authority when relevant (e.g. "cpsc says stop using" / "fda warning issued")
+- Avoid: "prices are rising" / "stores are changing" / "consumers are upset" / "limited time" (use real dates)
 
-Article: "Ben & Jerry's is holding Free Cone Day on April 14 at participating locations"
-→ {"offer": "free cone day", "detail": "april 14"}
+EXAMPLES (showing offer → detail pairs):
 
-Article: "Wendy's is offering a Jr. Frosty every visit for a year with a $3 key tag purchase"
-→ {"offer": "jr frosty for a year", "detail": "3 dollar key tag"}
+Article: "Shake Shack is giving away a free burger every week in May with any $10+ purchase"
+→ {"offer": "free burgers every week", "detail": "with 10 dollar plus purchase all may"}
 
-Article: "Costco has the Vitamix blender for $100 off this week"
-→ {"offer": "vitamix 100 dollars off", "detail": "this week only"}
+Article: "Chipotle is testing $2.50 tacos through June 2nd at select locations"
+→ {"offer": "2.50 tacos", "detail": "through june 2nd at select locations"}
 
-Article: "Dunkin is giving away a free medium coffee with any purchase on Monday"
-→ {"offer": "free medium coffee", "detail": "any purchase monday"}
+Article: "CPSC warns consumers to immediately stop using Gourmia pressure cookers sold at Best Buy after burn injuries"
+→ {"offer": "pressure cookers warning", "detail": "cpsc says stop using immediately"}
 
-Return ONLY valid JSON, no other text: {"offer":"...","detail":"..."}`;
+Article: "Thermos is recalling 8.2 million jars after reports of vision loss injuries"
+→ {"offer": "8.2 million jars recalled", "detail": "vision loss injuries reported"}
+
+Article: "Trader Joe's is being sued over its low acid coffee label, with the lawsuit claiming it misled buyers"
+→ {"offer": "sued over low acid coffee", "detail": "lawsuit claims label misled buyers"}
+
+Article: "Bank of America cardholders get free admission to 150+ museums May 2nd–3rd"
+→ {"offer": "free admission to 150 plus museums", "detail": "may 2nd and 3rd for cardholders"}
+
+Article: "Firehouse Subs is giving free subs to anyone named Mike on May 6th only"
+→ {"offer": "free subs for people named mike", "detail": "may 6th only"}
+
+Only use facts from the article. Return ONLY valid JSON, no other text: {"offer":"...","detail":"..."}`;
 
 // Format the AI-extracted facts into a clean 3-line headline
 function formatHeadlineFromFacts(brand, offer, detail) {
@@ -504,7 +577,7 @@ async function filterAndRewriteWithAI(candidates, apiKey) {
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
 export async function fetchStories() {
-  const all = await fetchAllSources();
+  const all = await fetchAllSources(process.env);
   const candidates = preFilter(all);
   console.log(`[pipeline] ${all.length} raw → ${candidates.length} after pre-filter`);
 
