@@ -296,7 +296,7 @@ function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
         )}
         <div className="story-card-body">
           <div className="story-brand">{story.brand}</div>
-          <div className="story-title">{story.title}</div>
+          <div className="story-title" title={story.title}>{story.title}</div>
           <div className="story-meta">
             <span>{story.sourceDomain}</span>
             <span className="meta-sep">·</span>

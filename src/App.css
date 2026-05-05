@@ -330,7 +330,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 10px;
-  align-items: start;
+  align-items: stretch;
+  grid-auto-rows: 1fr;
 }
 
 /* Wrapper — owns the border/background so preview box inherits it */
@@ -341,6 +342,10 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   overflow: hidden;
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 228px;
 }
 
 .story-card-wrap:hover:not(.story-card-wrap--disabled) {
@@ -364,6 +369,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   gap: 12px;
   padding: 16px 16px 16px 16px;
   cursor: pointer;
+  min-height: 132px;
+  flex: 1 1 auto;
 }
 
 .story-card-main input[type="checkbox"] { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -394,7 +401,14 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   letter-spacing: -0.02em;
 }
 
-.story-card-body { flex: 1; min-width: 0; }
+.story-card-body {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 
 .story-brand {
   font-size: 11px;
@@ -411,6 +425,11 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   line-height: 1.55;
   margin-bottom: 6px;
   color: var(--text);
+  min-height: 60px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .story-meta {
@@ -419,6 +438,14 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   gap: 10px;
   font-size: 12px;
   color: var(--text-3);
+  min-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.story-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .meta-sep { color: var(--border-2); }
@@ -449,7 +476,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   align-items: center;
   gap: 6px;
   padding: 10px 16px;
-  min-height: 44px;
+  min-height: 48px;
   background: transparent;
   border: none;
   border-top: 1px solid var(--border);
@@ -459,6 +486,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   cursor: pointer;
   text-align: left;
   transition: color 0.15s, background 0.15s;
+  flex: 0 0 auto;
 }
 
 .story-preview-toggle:hover { color: var(--text-2); background: var(--surface-2); }
@@ -664,15 +692,18 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   padding: 8px 16px 10px;
   border-top: 1px solid var(--border);
   background: var(--surface-2);
+  min-height: 54px;
+  flex: 0 0 auto;
 }
 
 .headline-preview-lines {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 0 6px;
+  overflow: hidden;
 }
 
 .hl-preview-brand {
@@ -692,6 +723,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  min-width: 0;
 }
 
 .btn-regenerate {
@@ -940,7 +972,14 @@ label:focus-visible {
   }
 
   /* Story card — slightly larger text for readability */
-  .story-title { font-size: 15px; }
+  .story-card-wrap { min-height: 242px; }
+
+  .story-card-main { min-height: 144px; }
+
+  .story-title {
+    font-size: 15px;
+    min-height: 70px;
+  }
 
   .story-thumb {
     width: 56px;
