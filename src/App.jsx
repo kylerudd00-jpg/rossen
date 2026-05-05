@@ -370,7 +370,7 @@ export default function App() {
     <div className="app">
 
       {/* ── Header ── */}
-      <header className="app-header">
+      <header className={`app-header ${phase === "idle" ? "app-header--home" : ""}`}>
         <div className="header-left">
           <img src="/rossen-reports.png" alt="Rossen Reports" className="header-logo" />
         </div>

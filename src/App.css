@@ -56,6 +56,10 @@ body {
   width: auto;
 }
 
+.app-header--home .header-logo {
+  height: 52px;
+}
+
 .header-status {
   display: flex;
   align-items: center;
