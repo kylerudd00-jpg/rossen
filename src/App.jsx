@@ -82,16 +82,17 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
 
   // Divider + logo — build layout bottom-up so nothing overlaps
   const logoImg = logoResult.status === "fulfilled" ? logoResult.value : null;
-  const LOGO_H  = Math.round(width * 0.18);
+  const LOGO_H  = Math.round(width * 0.13);
   const LOGO_W  = logoImg
     ? Math.round(LOGO_H * (logoImg.naturalWidth / logoImg.naturalHeight))
     : Math.round(LOGO_H * 1.43);
 
-  const belowLogoGap = Math.round(height * 0.052); // clear gap: logo bottom → text top
+  // Logo sits just above the text with a small breathing gap
+  const belowLogoGap = Math.round(width * 0.022);
   const logoY   = textTop - belowLogoGap - LOGO_H;
   const logoX   = (width - LOGO_W) / 2;
   const dividerY = Math.round(logoY + LOGO_H * 0.5); // line through center of logo
-  const lineGap = Math.round(width * 0.030);
+  const lineGap = Math.round(width * 0.026);
 
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.70)";
