@@ -341,7 +341,12 @@ export default function App() {
 
       let candidates = [];
       try {
-        const params = new URLSearchParams({ q: story.brand, headline });
+        const params = new URLSearchParams({
+          q: story.brand,
+          headline,
+          title: story.title || "",
+          summary: story.rawSummary || "",
+        });
         const res = await fetch(`/api/images?${params}`);
         if (res.ok) candidates = await res.json();
       } catch { /* dark background fallback */ }

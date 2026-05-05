@@ -5,6 +5,8 @@ export default async function handler(req, res) {
   const params = new URL(req.url, "http://localhost").searchParams;
   const brand    = params.get("q") || "";
   const headline = params.get("headline") || "";
+  const title    = params.get("title") || "";
+  const summary  = params.get("summary") || "";
   if (!brand) return res.status(200).json([]);
 
   try {
@@ -12,13 +14,13 @@ export default async function handler(req, res) {
     let query = null;
     if ((keys.geminiKey || keys.groqKey) && headline) {
       query = await gemini(
-        "Write a 4-6 word Google Images search query to find a real exterior photo of the brand in this story. Be specific enough to avoid ambiguity — include the brand type (restaurant, retail store, pharmacy, etc.) if the name could be confused with something else. Return only the search query, no quotes, no explanation.",
-        `Brand: ${brand}\nHeadline: ${headline}`,
+        "Write a 5-8 word Google Images query for a real exterior/streetfront photograph of the physical business in this story. Prefer storefront, restaurant exterior, drive-thru, entrance, or building sign photos. Do not search for logos, menus, products, coupons, screenshots, or generic brand images. Return only the query.",
+        `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,
         keys,
         { maxTokens: 32 },
       ).catch(() => null);
     }
-    const images = await searchImagesForBrand(brand, process.env, query);
+    const images = await searchImagesForBrand(brand, process.env, { aiQuery: query, headline, title, summary });
     res.status(200).json(images);
   } catch (e) {
     res.status(500).json({ error: e.message });

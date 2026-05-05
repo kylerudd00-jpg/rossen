@@ -48,20 +48,22 @@ export function apiPlugin() {
         if (url.pathname === "/api/images") {
           const brand    = url.searchParams.get("q") || "";
           const headline = url.searchParams.get("headline") || "";
+          const title    = url.searchParams.get("title") || "";
+          const summary  = url.searchParams.get("summary") || "";
           if (!brand) { res.setHeader("Content-Type", "application/json"); res.end("[]"); return; }
           try {
             let aiQuery = null;
             const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
             if ((keys.geminiKey || keys.groqKey) && headline) {
               aiQuery = await gemini(
-                "Write a 4-6 word Google Images search query to find a real exterior photo of the brand in this story. Be specific enough to avoid ambiguity — include the brand type (restaurant, retail store, pharmacy, etc.) if the name could be confused with something else. Return only the search query, no quotes, no explanation.",
-                `Brand: ${brand}\nHeadline: ${headline}`,
+                "Write a 5-8 word Google Images query for a real exterior/streetfront photograph of the physical business in this story. Prefer storefront, restaurant exterior, drive-thru, entrance, or building sign photos. Do not search for logos, menus, products, coupons, screenshots, or generic brand images. Return only the query.",
+                `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,
                 keys,
                 { maxTokens: 32 },
               ).catch(() => null);
             }
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(await searchImagesForBrand(brand, process.env, aiQuery)));
+            res.end(JSON.stringify(await searchImagesForBrand(brand, process.env, { aiQuery, headline, title, summary })));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
