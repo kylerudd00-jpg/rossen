@@ -28,6 +28,26 @@ const SEARCH_NAME_OVERRIDES = {
   "7-ELEVEN": "7-Eleven",
 };
 
+const CURATED_EXTERIOR_IMAGES = {
+  "MCDONALD'S": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/McDonald%27s_Chicago_Flagship.jpg/1280px-McDonald%27s_Chicago_Flagship.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/McDonalds_Denton_House%2C_New_Hyde_Park%2C_NY_crop.jpg/1280px-McDonalds_Denton_House%2C_New_Hyde_Park%2C_NY_crop.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/1/1b/McDonald%27s_Festival_Supermall_exterior.jpg",
+  ],
+  "STARBUCKS": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ad/Starbuckscenter.jpg/1280px-Starbuckscenter.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Starbucks_street_musician.jpg/1280px-Starbucks_street_musician.jpg",
+  ],
+  "TARGET": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Target_store_in_Stuart%2C_FL.jpg/1280px-Target_store_in_Stuart%2C_FL.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Target_%28Westminster_Mall%2C_California%29_-_2025.jpg/1280px-Target_%28Westminster_Mall%2C_California%29_-_2025.jpg",
+  ],
+  "WALMART": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Walmart_store_exterior_5266815680.jpg/1280px-Walmart_store_exterior_5266815680.jpg",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Walmart_4.jpg/1280px-Walmart_4.jpg",
+  ],
+};
+
 const POSITIVE_TERMS = [
   "building", "drive thru", "drive-thru", "entrance", "exterior", "location",
   "restaurant exterior", "sign", "store exterior", "storefront", "street view",
@@ -38,6 +58,11 @@ const NEGATIVE_TERMS = [
   "packaging", "png", "product", "promo", "promotion", "screenshot", "svg",
   "transparent", "vector",
 ];
+
+const WIKIMEDIA_HEADERS = {
+  "User-Agent": "DealPipeline/1.0 (https://deal-pipeline-navy.vercel.app/)",
+  "Accept": "application/json",
+};
 
 function isUsableImage(info) {
   if (!info) return false;
@@ -121,6 +146,34 @@ function buildExteriorQueries(brand, options = {}) {
     .filter(Boolean);
 
   return [...new Set(queries)].slice(0, options.maxQueries || 2);
+}
+
+function buildFallbackQueries(brand, options = {}) {
+  const searchName = brandToSearchName(brand);
+  const context = [options.headline, options.title, options.summary].filter(Boolean).join(" ");
+  const descriptor = inferVenueDescriptor(brand, context);
+  const isRestaurant = descriptor.includes("restaurant");
+  const isPharmacy = descriptor.includes("pharmacy");
+  const isWarehouse = descriptor.includes("warehouse");
+  const venueWord = isRestaurant ? "restaurant" : isPharmacy ? "pharmacy" : isWarehouse ? "warehouse" : "store";
+
+  return [
+    `${searchName} ${venueWord}`,
+    `${searchName} ${venueWord} exterior`,
+    `${searchName} storefront`,
+    `${searchName} building`,
+    `${searchName} ${descriptor}`,
+  ].map(cleanQuery).filter(Boolean);
+}
+
+function curatedExteriorCandidates(brand) {
+  return (CURATED_EXTERIOR_IMAGES[brand.toUpperCase()] || []).map((url, index) => ({
+    url,
+    title: `${brandToSearchName(brand)} exterior`,
+    sourceDomain: "wikimedia.org",
+    source: "curated",
+    queryIndex: index,
+  }));
 }
 
 function candidateKey(url) {
@@ -241,8 +294,10 @@ async function fetchCommonsImageCandidates(query) {
     srnamespace: "6", format: "json", srlimit: "20", origin: "*",
   });
   const searchRes = await fetch(`https://commons.wikimedia.org/w/api.php?${searchParams}`, {
+    headers: WIKIMEDIA_HEADERS,
     signal: AbortSignal.timeout(8000),
   });
+  if (!searchRes.ok || !searchRes.headers.get("content-type")?.includes("json")) return [];
   const searchData = await searchRes.json();
   const searchRows = searchData.query?.search || [];
   const titles = searchRows.map((r) => r.title);
@@ -250,19 +305,21 @@ async function fetchCommonsImageCandidates(query) {
 
   const infoParams = new URLSearchParams({
     action: "query", titles: titles.join("|"),
-    prop: "imageinfo", iiprop: "url|mime|size", iiurlwidth: "1200",
+    prop: "imageinfo", iiprop: "url|mime|size|thumburl", iiurlwidth: "1200",
     format: "json", origin: "*",
   });
   const infoRes = await fetch(`https://commons.wikimedia.org/w/api.php?${infoParams}`, {
+    headers: WIKIMEDIA_HEADERS,
     signal: AbortSignal.timeout(8000),
   });
+  if (!infoRes.ok || !infoRes.headers.get("content-type")?.includes("json")) return [];
   const infoData = await infoRes.json();
   const titleText = new Map(searchRows.map((row) => [row.title, row.snippet]));
 
   return Object.values(infoData.query?.pages || {})
     .filter((page) => isUsableImage(page.imageinfo?.[0]))
     .map((page) => ({
-      url: page.imageinfo?.[0]?.url,
+      url: page.imageinfo?.[0]?.thumburl || page.imageinfo?.[0]?.url,
       title: page.title,
       snippet: titleText.get(page.title),
       sourceDomain: "commons.wikimedia.org",
@@ -276,6 +333,35 @@ export async function fetchCommonsImages(query) {
   return toUrlList(await fetchCommonsImageCandidates(query));
 }
 
+async function fetchWikipediaSearchCandidates(query, queryIndex = 80) {
+  const params = new URLSearchParams({
+    action: "query",
+    generator: "search",
+    gsrsearch: query,
+    gsrlimit: "8",
+    prop: "pageimages",
+    pithumbsize: "1200",
+    format: "json",
+    origin: "*",
+  });
+  const res = await fetch(`https://en.wikipedia.org/w/api.php?${params}`, {
+    headers: WIKIMEDIA_HEADERS,
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok || !res.headers.get("content-type")?.includes("json")) return [];
+  const data = await res.json();
+  return Object.values(data.query?.pages || {})
+    .map((page) => ({
+      url: page.thumbnail?.source,
+      title: page.title,
+      sourceDomain: "wikipedia.org",
+      source: "wikipedia-search",
+      query,
+      queryIndex,
+    }))
+    .filter((item) => item.url);
+}
+
 async function fetchWikipediaThumbnailCandidates(brandName) {
   const params = new URLSearchParams({
     action: "query", titles: brandName,
@@ -283,8 +369,10 @@ async function fetchWikipediaThumbnailCandidates(brandName) {
     format: "json", origin: "*",
   });
   const res = await fetch(`https://en.wikipedia.org/w/api.php?${params}`, {
+    headers: WIKIMEDIA_HEADERS,
     signal: AbortSignal.timeout(8000),
   });
+  if (!res.ok || !res.headers.get("content-type")?.includes("json")) return [];
   const data = await res.json();
   const pages = Object.values(data.query?.pages || {});
   return pages
@@ -302,6 +390,21 @@ export async function fetchWikipediaThumbnail(brandName) {
   return toUrlList(await fetchWikipediaThumbnailCandidates(brandName));
 }
 
+async function fetchFallbackCandidates(brand, options = {}) {
+  const queries = buildFallbackQueries(brand, options).slice(0, 3);
+  const searches = [
+    fetchCommonsImageCandidates(queries[0]).then((items) =>
+      items.map((item) => ({ ...item, query: queries[0], queryIndex: 50 }))
+    ),
+    fetchCommonsImageCandidates(queries[1]).then((items) =>
+      items.map((item) => ({ ...item, query: queries[1], queryIndex: 51 }))
+    ),
+    fetchWikipediaSearchCandidates(queries[0], 70),
+  ];
+  const results = await Promise.allSettled(searches);
+  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+}
+
 // aiQuery is used as the first Google/Brave query, but deterministic exterior
 // queries follow it so weak AI queries do not dominate the result set.
 export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = null) {
@@ -314,7 +417,6 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
     ...options,
     maxQueries: Number(env.IMAGE_QUERY_LIMIT) || 2,
   });
-  const fallbackQuery = `${brandToSearchName(brand)} ${inferVenueDescriptor(brand, [options.headline, options.title, options.summary].join(" "))}`;
 
   const webSearches = queries.flatMap((query, queryIndex) => [
     googleKey && cseId ? fetchGoogleImageCandidates(query, googleKey, cseId, queryIndex) : Promise.resolve([]),
@@ -340,15 +442,22 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
 
   scored.forEach(addCandidate);
 
+  const curated = curatedExteriorCandidates(brand);
+  curated.forEach(addCandidate);
+
+  if (!googleKey && !braveKey && curated.length > 0) {
+    return merged.slice(0, 8);
+  }
+
   if (merged.length < 4) {
     const fallbackResults = await Promise.allSettled([
-      fetchCommonsImageCandidates(fallbackQuery),
+      fetchFallbackCandidates(brand, options),
       fetchWikipediaThumbnailCandidates(titleCase),
     ]);
     fallbackResults
       .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
       .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 99) }))
-      .filter((candidate) => candidate.score >= 10)
+      .filter((candidate) => candidate.score >= 16)
       .sort((a, b) => b.score - a.score)
       .forEach(addCandidate);
   }
