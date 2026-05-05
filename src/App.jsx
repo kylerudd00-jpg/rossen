@@ -198,16 +198,47 @@ function PostCard({ post }) {
 
 function StoryCard({ story, selected, onToggle, disabled }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [thumbnail, setThumbnail] = useState(null);
+
+  useEffect(() => {
+    const name = story.brand
+      .replace(/[^a-zA-Z0-9& ]/g, " ").trim()
+      .split(/\s+/)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
+    const params = new URLSearchParams({
+      action: "query", titles: name,
+      prop: "pageimages", pithumbsize: "160",
+      format: "json", origin: "*",
+    });
+    fetch(`https://en.wikipedia.org/w/api.php?${params}`)
+      .then(r => r.json())
+      .then(data => {
+        const src = Object.values(data.query?.pages || {})[0]?.thumbnail?.source;
+        if (src) setThumbnail(src);
+      })
+      .catch(() => {});
+  }, [story.brand]);
 
   return (
     <div className={`story-card-wrap ${selected ? "story-card-wrap--selected" : ""} ${disabled ? "story-card-wrap--disabled" : ""}`}>
       <label className="story-card-main">
         <input className="visually-hidden" type="checkbox" checked={selected} onChange={onToggle} disabled={disabled} />
+        {thumbnail ? (
+          <div className="story-thumb">
+            <img src={thumbnail} alt="" draggable="false" />
+          </div>
+        ) : (
+          <div className="story-thumb story-thumb--placeholder">
+            {story.brand.charAt(0)}
+          </div>
+        )}
         <div className="story-card-body">
           <div className="story-brand">{story.brand}</div>
           <div className="story-title">{story.title}</div>
           <div className="story-meta">
             <span>{story.sourceDomain}</span>
+            <span className="meta-sep">·</span>
             <span>{story.publishedAt}</span>
           </div>
         </div>
