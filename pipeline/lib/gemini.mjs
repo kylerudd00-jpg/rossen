@@ -13,6 +13,7 @@ async function callGemini(systemPrompt, userContent, apiKey, { maxTokens = 1024,
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 429) throw new Error("Gemini rate limit reached");
     throw new Error(`Gemini ${res.status}: ${body.slice(0, 120)}`);
   }
   const data = await res.json();
@@ -38,6 +39,7 @@ async function callGroq(systemPrompt, userContent, apiKey, { maxTokens = 1024, t
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 429) throw new Error("Groq rate limit reached");
     throw new Error(`Groq ${res.status}: ${body.slice(0, 120)}`);
   }
   const data = await res.json();
@@ -55,7 +57,12 @@ export async function gemini(systemPrompt, userContent, { geminiKey, groqKey } =
     }
   }
   if (groqKey) {
-    return await callGroq(systemPrompt, userContent, groqKey, opts);
+    try {
+      return await callGroq(systemPrompt, userContent, groqKey, opts);
+    } catch (e) {
+      if (e.message.includes("rate limit")) throw new Error("AI rate limit reached");
+      throw e;
+    }
   }
   throw new Error("No AI API key available");
 }

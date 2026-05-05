@@ -2,6 +2,7 @@ import { parseRssItems } from "./rss.mjs";
 import { summarizeText } from "./text.mjs";
 import { discoveryQueries } from "../config/discoveryQueries.mjs";
 import { gemini } from "./gemini.mjs";
+import { scoreCandidate } from "./scoring.mjs";
 
 // ─── Brand detection ──────────────────────────────────────────────────────────
 
@@ -544,9 +545,92 @@ function formatHeadlineFromFacts(brand, offer, detail) {
   return lines.join("\n");
 }
 
+function fallbackHeadlineForCandidate(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  const title = String(candidate.title || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const price = title.match(/\$\s?\d+(?:\.\d{2})?/);
+  const date = title.match(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/i);
+
+  let offer = "consumer alert";
+  let detail = "";
+
+  if (/\brecall(?:ed|s)?\b|\bcpsc\b|\bfda\b|\bwarning\b/.test(text)) {
+    offer = "recall alert";
+    detail = /\bsalmonella|listeria|allergy|contamination|burn|injury|fire\b/.test(text)
+      ? "check your home"
+      : "new warning issued";
+  } else if (/\bbogo\b|buy one get one/.test(text)) {
+    offer = "bogo deal";
+    detail = date ? date[0] : "limited time";
+  } else if (/\bfree\b/.test(text)) {
+    const freePhrase = title.match(/\bfree\s+[a-z0-9$.'-]+(?:\s+[a-z0-9$.'-]+){0,4}/i);
+    offer = freePhrase ? freePhrase[0] : "free deal";
+    detail = date ? date[0] : "limited time";
+    if (date && offer.toLowerCase().includes(date[0].toLowerCase())) {
+      offer = offer.replace(new RegExp(date[0], "i"), "").replace(/\s+/g, " ").trim();
+    }
+  } else if (price) {
+    offer = `${price[0].replace(/\s+/g, "")} deal`;
+    detail = date ? date[0] : "available now";
+  } else if (/\bclosing|bankruptcy|shutting down\b/.test(text)) {
+    offer = "stores closing";
+    detail = "new list released";
+  } else if (/\bnew\b|\blaunch|\breturns?\b|\bback\b/.test(text)) {
+    offer = /\bmenu\b|restaurant|burger|taco|pizza|coffee|sandwich/.test(text)
+      ? "new menu update"
+      : "new update";
+    detail = date ? date[0] : "available now";
+  } else if (/\bdeal|discount|save|sale|offer|promo/.test(text)) {
+    offer = "deal alert";
+    detail = date ? date[0] : "available now";
+  }
+
+  return formatHeadlineFromFacts(candidate.brand, offer, detail);
+}
+
+function fallbackStoriesWithHeadlines(candidates, limit = 12) {
+  const scored = candidates
+    .map(scoreCandidate)
+    .sort((left, right) => right.weightedTotal - left.weightedTotal);
+  const selected = [];
+  const brandCounts = new Map();
+
+  for (const candidate of scored) {
+    const brand = candidate.brand || "RETAIL";
+    const count = brandCounts.get(brand) || 0;
+    if (count >= 2) continue;
+
+    const headline = fallbackHeadlineForCandidate(candidate);
+    if (!headline.includes("\n")) continue;
+    selected.push({ ...candidate, headline, headlineProvider: "fallback" });
+    brandCounts.set(brand, count + 1);
+
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
+}
+
+function aiUnavailableMessage(error) {
+  return /rate limit|429|quota/i.test(error?.message || "")
+    ? "AI is rate-limited — using fallback headlines…"
+    : "AI is unavailable — using fallback headlines…";
+}
+
 export async function writeHeadline(candidate, keys) {
   const article = `Title: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
-  const text = await gemini(EXTRACT_PROMPT, article, keys, { maxTokens: 300 });
+  let text;
+  try {
+    text = await gemini(EXTRACT_PROMPT, article, keys, { maxTokens: 300 });
+  } catch (e) {
+    console.warn(`[pipeline] Headline AI unavailable for "${candidate.title}":`, e.message);
+    return fallbackHeadlineForCandidate(candidate);
+  }
   const match = text.match(/\{[\s\S]*?\}/);
   if (!match) throw new Error("No JSON in headline response");
   const { brand, offer, detail } = JSON.parse(match[0]);
@@ -588,9 +672,11 @@ async function filterAndRewriteWithAI(candidates, keys, progress) {
 let _cache = null;
 let _cacheAt = 0;
 const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
+const FALLBACK_CACHE_TTL = 15 * 60 * 1000; // retry AI soon after rate limits clear
+let _cacheTtl = CACHE_TTL;
 
 export async function fetchStories(progress = () => {}) {
-  if (_cache && Date.now() - _cacheAt < CACHE_TTL) {
+  if (_cache && Date.now() - _cacheAt < _cacheTtl) {
     progress("Loading today's stories…", 100);
     return _cache;
   }
@@ -609,13 +695,34 @@ export async function fetchStories(progress = () => {}) {
       console.log(`[pipeline] ${results.length} stories with headlines`);
       _cache = results;
       _cacheAt = Date.now();
+      _cacheTtl = CACHE_TTL;
       return results;
     } catch (e) {
-      throw new Error(`AI pipeline failed: ${e.message}`);
+      const fallback = fallbackStoriesWithHeadlines(candidates);
+      if (fallback.length > 0) {
+        const message = aiUnavailableMessage(e);
+        progress(message, 85);
+        progress(`Done — ${fallback.length} fallback stories ready`, 100);
+        console.warn(`[pipeline] AI pipeline unavailable, using fallback headlines: ${e.message}`);
+        _cache = fallback;
+        _cacheAt = Date.now();
+        _cacheTtl = FALLBACK_CACHE_TTL;
+        return fallback;
+      }
+      throw new Error("AI is temporarily unavailable and no fallback stories were available. Try again in a few minutes.");
     }
   }
 
-  throw new Error("No AI API key configured — add GEMINI_API_KEY or GROQ_API_KEY to .env");
+  const fallback = fallbackStoriesWithHeadlines(candidates);
+  if (fallback.length > 0) {
+    progress(`Done — ${fallback.length} fallback stories ready`, 100);
+    _cache = fallback;
+    _cacheAt = Date.now();
+    _cacheTtl = FALLBACK_CACHE_TTL;
+    return fallback;
+  }
+
+  throw new Error("No AI API key configured and no fallback stories were available.");
 }
 
 // ─── Image search ─────────────────────────────────────────────────────────────
