@@ -130,6 +130,9 @@ function PostCard({ post }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [rendering, setRendering] = useState(true);
   const renderIdRef = useRef(0);
+  const [editableHeadline, setEditableHeadline] = useState(post.headline || "");
+  const [editingHeadline, setEditingHeadline] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const candidates = post.imageCandidates || [];
   const activeImage = candidates[imageIdx] || post.imageUrl || null;
@@ -139,7 +142,7 @@ function PostCard({ post }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRendering(true);
     const dpr = window.devicePixelRatio || 2;
-    renderPost({ ...post, imageUrl: activeImage }, { width: 540 * dpr, height: 675 * dpr })
+    renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline }, { width: 540 * dpr, height: 675 * dpr })
       .then((canvas) => {
         if (renderIdRef.current !== id) return;
         setPreviewUrl(canvas.toDataURL("image/png"));
@@ -150,10 +153,10 @@ function PostCard({ post }) {
         setPreviewUrl(null);
         setRendering(false);
       });
-  }, [post, activeImage]);
+  }, [post, activeImage, editableHeadline]);
 
   async function handleDownload() {
-    const canvas = await renderPost({ ...post, imageUrl: activeImage }, { width: 1080, height: 1350 });
+    const canvas = await renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline }, { width: 1080, height: 1350 });
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -165,7 +168,29 @@ function PostCard({ post }) {
     }, "image/png");
   }
 
-  const headlineLines = (post.headline || "").split("\n").filter(Boolean);
+  async function handleCopy() {
+    const canvas = await renderPost(
+      { ...post, imageUrl: activeImage, headline: editableHeadline },
+      { width: 1080, height: 1350 }
+    );
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${post.brand.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    }, "image/png");
+  }
+
+  const headlineLines = (editableHeadline || "").split("\n").filter(Boolean);
 
   return (
     <div className="post-card">
@@ -183,12 +208,26 @@ function PostCard({ post }) {
         )}
       </div>
       <div className="post-footer">
-        <div className="post-headline-lines">
-          {headlineLines.map((line, i) => (
-            <span key={i} className={i === 0 ? "hl-brand" : "hl-line"}>{line}</span>
-          ))}
+        {editingHeadline ? (
+          <textarea
+            className="headline-editor"
+            value={editableHeadline}
+            onChange={e => setEditableHeadline(e.target.value)}
+            onBlur={() => setEditingHeadline(false)}
+            autoFocus
+          />
+        ) : (
+          <div className="post-headline-lines" onClick={() => setEditingHeadline(true)}>
+            {headlineLines.map((line, i) => (
+              <span key={i} className={i === 0 ? "hl-brand" : "hl-line"}>{line}</span>
+            ))}
+            <span className="edit-hint">✎ edit</span>
+          </div>
+        )}
+        <div className="post-actions">
+          <button className="btn-copy" onClick={handleCopy}>{copied ? "✓ Copied!" : "Copy"}</button>
+          <button className="btn-download" onClick={handleDownload}>↓ Save</button>
         </div>
-        <button className="btn-download" onClick={handleDownload}>↓ Download</button>
       </div>
     </div>
   );
@@ -196,9 +235,30 @@ function PostCard({ post }) {
 
 // ─── StoryCard ────────────────────────────────────────────────────────────────
 
-function StoryCard({ story, selected, onToggle, disabled }) {
+function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [thumbnail, setThumbnail] = useState(null);
+  const [regenerating, setRegenerating] = useState(false);
+
+  async function handleRegenerate(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (regenerating) return;
+    setRegenerating(true);
+    try {
+      const r = await fetch("/api/headline", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ brand: story.brand, title: story.title, summary: story.rawSummary }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.headline?.includes("\n")) onUpdateHeadline(data.headline);
+      }
+    } finally {
+      setRegenerating(false);
+    }
+  }
 
   useEffect(() => {
     // Use search generator so "MCDONALD'S" finds "McDonald's", etc.
@@ -247,6 +307,19 @@ function StoryCard({ story, selected, onToggle, disabled }) {
           {selected && <svg viewBox="0 0 12 10" fill="none"><polyline points="1,5 4.5,9 11,1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
         </div>
       </label>
+
+      {story.headline && (
+        <div className="headline-preview-row">
+          <div className="headline-preview-lines">
+            {story.headline.split("\n").filter(Boolean).map((line, i) => (
+              <span key={i} className={i === 0 ? "hl-preview-brand" : "hl-preview-line"}>{line}</span>
+            ))}
+          </div>
+          <button className="btn-regenerate" onClick={handleRegenerate} disabled={regenerating} title="Regenerate headline">
+            {regenerating ? <span className="regen-spinner" /> : "↻"}
+          </button>
+        </div>
+      )}
 
       {story.sourceUrl && (
         <>
@@ -399,6 +472,13 @@ export default function App() {
     setError(null);
   }
 
+  function updateStoryHeadline(id, headline) {
+    setStories(prev => prev.map(s => s.id === id ? { ...s, headline } : s));
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchStories(); }, []);
+
   return (
     <div className="app">
 
@@ -510,6 +590,7 @@ export default function App() {
                       selected={selected.has(story.id)}
                       onToggle={() => toggleStory(story.id)}
                       disabled={!selected.has(story.id) && selected.size >= 5}
+                      onUpdateHeadline={(h) => updateStoryHeadline(story.id, h)}
                     />
                   ))}
                 </div>
