@@ -88,10 +88,9 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
     : Math.round(LOGO_H * 1.43);
 
   const belowLogoGap = Math.round(height * 0.052); // clear gap: logo bottom → text top
-  const aboveLogoGap = Math.round(height * 0.028); // clear gap: divider line → logo top
   const logoY   = textTop - belowLogoGap - LOGO_H;
   const logoX   = (width - LOGO_W) / 2;
-  const dividerY = logoY - aboveLogoGap;
+  const dividerY = Math.round(logoY + LOGO_H * 0.5); // line through center of logo
   const lineGap = Math.round(width * 0.030);
 
   ctx.save();
