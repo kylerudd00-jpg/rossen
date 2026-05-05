@@ -886,11 +886,11 @@ label:focus-visible {
   /* Header */
   .app-header {
     padding: 0 16px;
-    height: 56px;
+    height: 64px;
     gap: 8px;
   }
 
-  .header-logo { height: 38px; }
+  .header-logo { height: 52px; }
 
   /* Hide "Last refreshed X ago" — not worth the space on mobile */
   .header-status { display: none; }
@@ -913,7 +913,7 @@ label:focus-visible {
   /* Phase wrappers */
   .phase-idle,
   .phase-center {
-    min-height: calc(100vh - 56px);
+    min-height: calc(100vh - 64px);
     padding: 32px 0;
   }
 
@@ -945,7 +945,7 @@ label:focus-visible {
   .selecting-bar {
     flex-direction: column;
     align-items: stretch;
-    top: 56px;
+    top: 64px;
     gap: 10px;
     padding: 12px 0;
   }
