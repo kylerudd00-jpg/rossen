@@ -80,18 +80,19 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
   const totalTextH = lines.length * lineH;
   const textTop    = height - bottomPad - totalTextH;
 
-  // Divider + logo
-  const dividerPad = Math.round(height * 0.044);
-  const dividerY   = textTop - dividerPad;
-
+  // Divider + logo — build layout bottom-up so nothing overlaps
   const logoImg = logoResult.status === "fulfilled" ? logoResult.value : null;
   const LOGO_H  = Math.round(width * 0.18);
   const LOGO_W  = logoImg
     ? Math.round(LOGO_H * (logoImg.naturalWidth / logoImg.naturalHeight))
     : Math.round(LOGO_H * 1.43);
+
+  const belowLogoGap = Math.round(height * 0.052); // clear gap: logo bottom → text top
+  const aboveLogoGap = Math.round(height * 0.028); // clear gap: divider line → logo top
+  const logoY   = textTop - belowLogoGap - LOGO_H;
   const logoX   = (width - LOGO_W) / 2;
-  const logoY   = dividerY - LOGO_H * 0.5;
-  const lineGap = Math.round(width * 0.024);
+  const dividerY = logoY - aboveLogoGap;
+  const lineGap = Math.round(width * 0.030);
 
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.70)";
@@ -370,7 +371,7 @@ export default function App() {
     <div className="app">
 
       {/* ── Header ── */}
-      <header className={`app-header ${phase === "idle" ? "app-header--home" : ""}`}>
+      <header className="app-header">
         <div className="header-left">
           <img src="/rossen-reports.png" alt="Rossen Reports" className="header-logo" />
         </div>
