@@ -225,7 +225,7 @@ function PostCard({ post }) {
           </div>
         )}
         <div className="post-actions">
-          <button className="btn-copy" onClick={handleCopy}>{copied ? "✓ Copied!" : "Copy"}</button>
+          <button className={`btn-copy ${copied ? "btn-copy--copied" : ""}`} onClick={handleCopy}>{copied ? "✓ Copied!" : "Copy"}</button>
           <button className="btn-download" onClick={handleDownload}>↓ Save</button>
         </div>
       </div>
@@ -476,7 +476,6 @@ export default function App() {
     setStories(prev => prev.map(s => s.id === id ? { ...s, headline } : s));
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchStories(); }, []);
 
   return (

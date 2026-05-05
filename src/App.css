@@ -656,6 +656,147 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .btn-download:hover { opacity: 0.9; transform: translateY(-1px); }
 
+/* ── Headline preview row (story card) ───────────────────────────────────── */
+.headline-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.headline-preview-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
+.hl-preview-brand {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hl-preview-line {
+  font-size: 10px;
+  color: var(--text-3);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.btn-regenerate {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 15px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.btn-regenerate:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.btn-regenerate:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.regen-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ── Post footer redesign ────────────────────────────────────────────────── */
+.post-footer {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.post-headline-lines {
+  cursor: pointer;
+}
+
+.edit-hint {
+  display: block;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 3px;
+  transition: color 0.15s;
+}
+
+.post-headline-lines:hover .edit-hint { color: var(--accent); }
+
+.headline-editor {
+  width: 100%;
+  min-height: 92px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.post-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-copy {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 1;
+  transition: all 0.15s;
+}
+
+.btn-copy:hover { background: var(--surface-2); border-color: #555; }
+.btn-copy--copied { border-color: var(--green); color: var(--green); }
+
+.btn-download {
+  flex: 1;
+  text-align: center;
+}
+
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
   display: flex;
@@ -838,18 +979,18 @@ label:focus-visible {
     gap: 16px;
   }
 
-  /* Post footer — stack headline above download */
+  /* Post footer */
   .post-footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
     padding: 12px 14px 14px;
   }
 
+  .post-actions {
+    flex-direction: row;
+  }
+
+  .btn-copy,
   .btn-download {
-    text-align: center;
-    padding: 14px 16px;
-    font-size: 14px;
+    padding: 14px 12px;
   }
 
   /* Photo cycle button — bigger tap target */

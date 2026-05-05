@@ -26,3 +26,5 @@ dist-ssr
 node_modules
 dist
 .vercel
+.claude/
+17474a33-3628-439d-9495-463985989e9e_600x600.png
