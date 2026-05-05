@@ -441,11 +441,12 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
   };
 
   scored.forEach(addCandidate);
+  const webCandidateCount = merged.length;
 
   const curated = curatedExteriorCandidates(brand);
   curated.forEach(addCandidate);
 
-  if (!googleKey && !braveKey && curated.length > 0) {
+  if (curated.length > 0 && (webCandidateCount === 0 || merged.length >= 3)) {
     return merged.slice(0, 8);
   }
 
