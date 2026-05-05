@@ -201,15 +201,16 @@ function StoryCard({ story, selected, onToggle, disabled }) {
   const [thumbnail, setThumbnail] = useState(null);
 
   useEffect(() => {
-    const name = story.brand
-      .replace(/[^a-zA-Z0-9& ]/g, " ").trim()
-      .split(/\s+/)
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(" ");
+    // Use search generator so "MCDONALD'S" finds "McDonald's", etc.
     const params = new URLSearchParams({
-      action: "query", titles: name,
-      prop: "pageimages", pithumbsize: "160",
-      format: "json", origin: "*",
+      action: "query",
+      generator: "search",
+      gsrsearch: story.brand,
+      gsrlimit: "1",
+      prop: "pageimages",
+      pithumbsize: "200",
+      format: "json",
+      origin: "*",
     });
     fetch(`https://en.wikipedia.org/w/api.php?${params}`)
       .then(r => r.json())
