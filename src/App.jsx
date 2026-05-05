@@ -388,7 +388,8 @@ export default function App() {
               onClick={fetchStories}
               disabled={phase === "loading" || phase === "generating"}
             >
-              ↺ Fetch Today's Stories
+              <span className="btn-text-full">↺ Fetch Stories</span>
+              <span className="btn-text-short">↺ Refresh</span>
             </button>
           )}
         </div>
