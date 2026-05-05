@@ -29,6 +29,7 @@ export function apiPlugin() {
         const url = new URL(req.url, "http://localhost");
 
         if (url.pathname === "/api/stories") {
+          const force = url.searchParams.get("force") === "1";
           res.setHeader("Content-Type", "text/event-stream");
           res.setHeader("Cache-Control", "no-cache");
           res.setHeader("Connection", "keep-alive");
@@ -36,7 +37,7 @@ export function apiPlugin() {
           try {
             const stories = await fetchStories((message, percent) => {
               send({ type: "progress", message, percent });
-            });
+            }, { force });
             send({ type: "done", stories });
           } catch (e) {
             send({ type: "error", message: e.message });

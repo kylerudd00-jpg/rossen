@@ -70,6 +70,12 @@ Copy `.env.example` into your local environment and set the values you want to u
 - `RENDER_PROVIDER`: `local-svg` or `canva`
 - `PIPELINE_OUTPUT_DIR`: where batch artifacts are written
 - `MAX_CANDIDATES_PER_QUERY`: cap per discovery query
+- `GOOGLE_NEWS_PER_QUERY`: Google News RSS results to pull from each discovery query
+- `GOOGLE_NEWS_CONCURRENCY`: how many Google News discovery queries to run at once
+- `BRAVE_NEWS_COUNT`: Brave News results per Brave query
+- `PREFILTER_LIMIT`: maximum ranked stories sent forward after dedupe/filtering
+- `BRAND_STORY_LIMIT`: maximum prefiltered stories per brand
+- `AI_CANDIDATE_LIMIT`: maximum candidates sent into the AI ranking/writing pass
 - `TOP_STORY_COUNT`: desired daily batch size
 - `DRY_RUN`: force preview delivery even when email credentials exist
 

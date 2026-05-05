@@ -372,12 +372,12 @@ export default function App() {
   const [genProgress, setGenProgress] = useState({ current: 0, total: 0, label: "" });
   const [lastFetched, setLastFetched] = useState(null);
 
-  async function fetchStories() {
+  async function fetchStories({ force = false } = {}) {
     setPhase("loading");
     setError(null);
     setFetchProgress({ message: "Starting…", percent: 0 });
     try {
-      const res = await fetch("/api/stories");
+      const res = await fetch(force ? "/api/stories?force=1" : "/api/stories");
       if (!res.ok) throw new Error(`Stories fetch failed (${res.status})`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -476,7 +476,7 @@ export default function App() {
     setStories(prev => prev.map(s => s.id === id ? { ...s, headline } : s));
   }
 
-  useEffect(() => { fetchStories(); }, []);
+  useEffect(() => { fetchStories({ force: true }); }, []);
 
   return (
     <div className="app">
@@ -496,7 +496,7 @@ export default function App() {
           {(phase === "selecting" || phase === "done") && (
             <button
               className="btn-fetch-header"
-              onClick={fetchStories}
+              onClick={() => fetchStories({ force: true })}
               disabled={phase === "loading" || phase === "generating"}
             >
               <span className="btn-text-full">↺ Fetch Stories</span>
@@ -515,7 +515,7 @@ export default function App() {
               {error && <div className="error-banner">{error}</div>}
               <h1 className="idle-title">Today's Post Builder</h1>
               <p className="idle-desc">Pulls today's deals, recalls, and consumer news from 40+ sources, picks the ones worth posting, and writes the headlines for you.</p>
-              <button className="btn-fetch" onClick={fetchStories}>
+              <button className="btn-fetch" onClick={() => fetchStories({ force: true })}>
                 Get Today's Stories
               </button>
             </div>
@@ -576,7 +576,7 @@ export default function App() {
                 return (
                   <div className="empty-state">
                     <p>No stories found for today. The pipeline may still be warming up, or all results were filtered out.</p>
-                    <button className="btn-fetch" onClick={fetchStories}>Try again</button>
+                    <button className="btn-fetch" onClick={() => fetchStories({ force: true })}>Try again</button>
                   </div>
                 );
               }

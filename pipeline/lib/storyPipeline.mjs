@@ -4,6 +4,17 @@ import { discoveryQueries } from "../config/discoveryQueries.mjs";
 import { gemini } from "./gemini.mjs";
 import { scoreCandidate } from "./scoring.mjs";
 
+function envNumber(env, key, fallback) {
+  const value = Number(env?.[key]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 // ─── Brand detection ──────────────────────────────────────────────────────────
 
 const BRAND_PATTERNS = [
@@ -201,17 +212,22 @@ async function fetchFeed(id, url, label, limit = 10) {
   }
 }
 
-async function fetchGoogleNews(maxPerQuery = 3) {
+async function fetchGoogleNews({ maxPerQuery = 10, concurrency = 8 } = {}) {
   const allItems = [];
-  for (const query of discoveryQueries) {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query.query)}&hl=en-US&gl=US&ceid=US:en`;
-    try {
-      const xml = await fetchRss(url);
-      const items = parseRssItems(xml).slice(0, maxPerQuery).map((item, i) => toCandidate(item, query.id, query.label, i));
-      allItems.push(...items);
-    } catch (e) {
-      console.warn(`[pipeline] Google News "${query.label}" failed:`, e.message);
-    }
+  for (const batch of chunkArray(discoveryQueries, concurrency)) {
+    const results = await Promise.allSettled(
+      batch.map(async (query) => {
+        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query.query)}&hl=en-US&gl=US&ceid=US:en`;
+        try {
+          const xml = await fetchRss(url);
+          return parseRssItems(xml).slice(0, maxPerQuery).map((item, i) => toCandidate(item, query.id, query.label, i));
+        } catch (e) {
+          console.warn(`[pipeline] Google News "${query.label}" failed:`, e.message);
+          return [];
+        }
+      })
+    );
+    results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
   }
   return allItems;
 }
@@ -256,7 +272,7 @@ function dealFingerprint(candidate) {
   return `${candidate.brand}:${words}`;
 }
 
-function preFilter(candidates) {
+function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
   const seenUrls = new Set();
   const seenTitleFps = new Set();
   const seenDealFps = new Set();
@@ -282,13 +298,16 @@ function preFilter(candidates) {
     const dealFp = dealFingerprint(c);
     if (seenDealFps.has(dealFp)) return false;
     seenDealFps.add(dealFp);
-    // Cap at 2 stories per brand so one brand can't flood the feed
+    // Cap per brand so one brand can't flood the feed
     const bc = brandCount[c.brand] || 0;
-    if (bc >= 2) return false;
+    if (bc >= brandLimit) return false;
     brandCount[c.brand] = bc + 1;
 
     return true;
-  }).slice(0, 25);
+  })
+    .map(scoreCandidate)
+    .sort((left, right) => right.weightedTotal - left.weightedTotal)
+    .slice(0, limit);
 }
 
 // ─── Brave news search ────────────────────────────────────────────────────────
@@ -329,7 +348,7 @@ function braveQueries() {
   ];
 }
 
-async function fetchBraveNews(apiKey) {
+async function fetchBraveNews(apiKey, { count = 8 } = {}) {
   const queries = braveQueries();
   // Run in batches of 10 to avoid rate limits
   const allItems = [];
@@ -337,7 +356,7 @@ async function fetchBraveNews(apiKey) {
     const batch = queries.slice(i, i + 10);
     const results = await Promise.allSettled(
       batch.map(async (q) => {
-        const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=5&freshness=pw`;
+        const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=${count}&freshness=pw`;
         const res = await fetch(url, {
           headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": apiKey },
           signal: AbortSignal.timeout(8000),
@@ -373,9 +392,12 @@ async function fetchBraveNews(apiKey) {
 
 async function fetchAllSources(env = {}) {
   const braveKey = env.BRAVE_API_KEY;
+  const googleNewsPerQuery = envNumber(env, "GOOGLE_NEWS_PER_QUERY", envNumber(env, "MAX_CANDIDATES_PER_QUERY", 10));
+  const googleNewsConcurrency = envNumber(env, "GOOGLE_NEWS_CONCURRENCY", 24);
+  const braveNewsCount = envNumber(env, "BRAVE_NEWS_COUNT", 8);
   const results = await Promise.allSettled([
-    fetchGoogleNews(3),
-    braveKey ? fetchBraveNews(braveKey) : Promise.resolve([]),
+    fetchGoogleNews({ maxPerQuery: googleNewsPerQuery, concurrency: googleNewsConcurrency }),
+    braveKey ? fetchBraveNews(braveKey, { count: braveNewsCount }) : Promise.resolve([]),
     // ── High-quality consumer news outlets ────────────────────────────────────
     fetchFeed("people-food",   "https://people.com/food/feed/",                               "People Food",         15),
     fetchFeed("people-shop",   "https://people.com/shopping/feed/",                           "People Shopping",     10),
@@ -675,22 +697,26 @@ const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
 const FALLBACK_CACHE_TTL = 15 * 60 * 1000; // retry AI soon after rate limits clear
 let _cacheTtl = CACHE_TTL;
 
-export async function fetchStories(progress = () => {}) {
-  if (_cache && Date.now() - _cacheAt < _cacheTtl) {
+export async function fetchStories(progress = () => {}, { force = false } = {}) {
+  if (!force && _cache && Date.now() - _cacheAt < _cacheTtl) {
     progress("Loading today's stories…", 100);
     return _cache;
   }
 
-  progress("Scanning news feeds…", 5);
+  progress(`Running mega search across ${discoveryQueries.length} Google News queries…`, 5);
   const all = await fetchAllSources(process.env);
   progress(`Scanning ${all.length} articles — picking the best ones…`, 30);
-  const candidates = preFilter(all);
+  const candidates = preFilter(all, {
+    limit: envNumber(process.env, "PREFILTER_LIMIT", 120),
+    brandLimit: envNumber(process.env, "BRAND_STORY_LIMIT", 3),
+  });
   console.log(`[pipeline] ${all.length} raw → ${candidates.length} after pre-filter`);
 
   const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
   if (keys.geminiKey || keys.groqKey) {
     try {
-      const results = await filterAndRewriteWithAI(candidates, keys, progress);
+      const aiCandidateLimit = envNumber(process.env, "AI_CANDIDATE_LIMIT", 80);
+      const results = await filterAndRewriteWithAI(candidates.slice(0, aiCandidateLimit), keys, progress);
       progress(`Done — ${results.length} stories ready`, 100);
       console.log(`[pipeline] ${results.length} stories with headlines`);
       _cache = results;

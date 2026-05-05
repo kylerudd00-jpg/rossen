@@ -3,7 +3,7 @@ const month = now.toLocaleString("en-US", { month: "long" });
 const year = now.getFullYear();
 const my = `${month} ${year}`;
 
-export const discoveryQueries = [
+const curatedDiscoveryQueries = [
   // ── New menu items & returning favorites ─────────────────────────────────────
   {
     id: "new-menu-launch",
@@ -151,3 +151,175 @@ export const discoveryQueries = [
     query: `"hidden fees" OR "surveillance pricing" OR "data breach" OR "overcharged" OR "class action" consumer brand ${year}`,
   },
 ];
+
+const restaurantBrands = [
+  "McDonald's", "Starbucks", "Chipotle", "Chick-fil-A", "Taco Bell",
+  "Burger King", "Subway", "Wendy's", "Domino's", "Pizza Hut", "Popeyes",
+  "Shake Shack", "Dunkin'", "Dairy Queen", "Krispy Kreme", "Panera",
+  "Applebee's", "Olive Garden", "Red Lobster", "IHOP", "Denny's",
+  "Sonic", "Jersey Mike's", "Papa John's", "Little Caesars", "Five Guys",
+  "Wingstop", "Buffalo Wild Wings", "Cracker Barrel", "Raising Cane's",
+  "Qdoba", "Potbelly",
+];
+
+const retailBrands = [
+  "Costco", "Walmart", "Target", "Sam's Club", "Amazon", "Aldi",
+  "Trader Joe's", "Kroger", "Publix", "Whole Foods", "CVS", "Walgreens",
+  "Dollar Tree", "Dollar General", "Home Depot", "Lowe's", "Best Buy",
+  "Bath & Body Works", "TJ Maxx", "Marshalls", "Kohl's", "Macy's",
+  "Nordstrom", "Old Navy", "Gap", "Sephora", "Ulta", "Petco", "PetSmart",
+  "Five Below", "IKEA", "Wayfair", "Academy Sports", "REI",
+];
+
+const serviceBrands = [
+  "Disney+", "Netflix", "Hulu", "Spotify", "YouTube Premium", "Verizon",
+  "AT&T", "T-Mobile", "Boost Mobile",
+];
+
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function brandQueries(brand, kind) {
+  const quoted = `"${brand}"`;
+  const common = [
+    {
+      intent: "consumer-alert",
+      label: "consumer alerts",
+      query: `${quoted} recall OR warning OR lawsuit OR "class action" OR "data breach" consumer ${year}`,
+    },
+    {
+      intent: "price-policy",
+      label: "price and policy changes",
+      query: `${quoted} "price increase" OR "price drop" OR "membership fee" OR "new policy" OR "closing locations" ${my}`,
+    },
+  ];
+
+  if (kind === "restaurant") {
+    return [
+      {
+        intent: "food-deals",
+        label: "food deals",
+        query: `${quoted} deal OR promotion OR free OR BOGO OR coupon OR rewards restaurant ${my}`,
+      },
+      {
+        intent: "menu-news",
+        label: "menu news",
+        query: `${quoted} "new menu" OR "new item" OR "limited time" OR returns OR launches restaurant ${my}`,
+      },
+      {
+        intent: "app-rewards",
+        label: "app and rewards offers",
+        query: `${quoted} app OR rewards OR "loyalty" free OR deal OR offer ${my}`,
+      },
+      ...common,
+    ];
+  }
+
+  if (kind === "service") {
+    return [
+      {
+        intent: "subscription-deals",
+        label: "subscription deals",
+        query: `${quoted} deal OR free OR discount OR bundle OR price change subscription ${my}`,
+      },
+      {
+        intent: "service-changes",
+        label: "service changes",
+        query: `${quoted} "price increase" OR "new plan" OR "policy change" OR "data breach" ${year}`,
+      },
+      ...common,
+    ];
+  }
+
+  return [
+    {
+      intent: "retail-deals",
+      label: "retail deals",
+      query: `${quoted} sale OR deal OR discount OR coupon OR rewards OR free ${my}`,
+    },
+    {
+      intent: "new-items",
+      label: "new items and launches",
+      query: `${quoted} "new item" OR "limited edition" OR collaboration OR launches OR returns ${my}`,
+    },
+    {
+      intent: "store-events",
+      label: "store events and perks",
+      query: `${quoted} free class OR workshop OR event OR giveaway OR members ${my}`,
+    },
+    ...common,
+  ];
+}
+
+const megaBrandQueries = [
+  ...restaurantBrands.flatMap((brand) => brandQueries(brand, "restaurant")),
+  ...retailBrands.flatMap((brand) => brandQueries(brand, "retail")),
+  ...serviceBrands.flatMap((brand) => brandQueries(brand, "service")),
+].map((item) => ({
+  id: `mega-${slug(item.label)}-${slug(item.query.slice(0, 36))}`,
+  label: `Mega: ${item.label}`,
+  query: item.query,
+}));
+
+const broadMegaQueries = [
+  {
+    id: "mega-freebies-everywhere",
+    label: "Mega: all major freebies",
+    query: `"free" "deal" "promotion" "restaurant" OR "retail" OR "store" ${my}`,
+  },
+  {
+    id: "mega-app-rewards",
+    label: "Mega: app and rewards deals",
+    query: `"app only" OR "rewards members" OR "loyalty members" free OR deal OR offer ${my}`,
+  },
+  {
+    id: "mega-senior-teacher-military",
+    label: "Mega: appreciation discounts",
+    query: `"senior discount" OR "teacher appreciation" OR "nurses week" OR "military discount" brand deal ${year}`,
+  },
+  {
+    id: "mega-retail-recalls",
+    label: "Mega: retail recalls",
+    query: `"sold at" Walmart OR Target OR Costco OR Amazon recall warning FDA CPSC ${my}`,
+  },
+  {
+    id: "mega-food-recalls",
+    label: "Mega: food recalls",
+    query: `"food recall" salmonella OR listeria OR allergy OR contamination store brand ${my}`,
+  },
+  {
+    id: "mega-store-closures",
+    label: "Mega: store closures",
+    query: `"closing stores" OR "closing locations" OR bankruptcy OR liquidation retail chain ${year}`,
+  },
+  {
+    id: "mega-price-changes",
+    label: "Mega: price changes",
+    query: `"price increase" OR "prices going up" OR "membership fee" OR "subscription price" major brand ${my}`,
+  },
+  {
+    id: "mega-class-actions",
+    label: "Mega: class actions and settlements",
+    query: `"class action" OR settlement OR "lawsuit claims" customer consumer brand ${year}`,
+  },
+  {
+    id: "mega-data-breach",
+    label: "Mega: data breaches",
+    query: `"data breach" OR "customer data" OR "personal information" retail restaurant brand ${year}`,
+  },
+  {
+    id: "mega-holiday-seasonal",
+    label: "Mega: seasonal deals",
+    query: `"limited time" OR "seasonal" OR holiday free deal restaurant retail brand ${my}`,
+  },
+];
+
+const seenQueries = new Set();
+export const discoveryQueries = [...curatedDiscoveryQueries, ...megaBrandQueries, ...broadMegaQueries]
+  .filter((query) => {
+    const key = query.query.toLowerCase();
+    if (seenQueries.has(key)) return false;
+    seenQueries.add(key);
+    return true;
+  });

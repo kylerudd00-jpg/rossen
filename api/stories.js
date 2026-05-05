@@ -1,6 +1,7 @@
 import { fetchStories } from "../pipeline/lib/storyPipeline.mjs";
 
 export default async function handler(req, res) {
+  const force = new URL(req.url, "http://localhost").searchParams.get("force") === "1";
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -8,7 +9,7 @@ export default async function handler(req, res) {
   try {
     const stories = await fetchStories((message, percent) => {
       send({ type: "progress", message, percent });
-    });
+    }, { force });
     send({ type: "done", stories });
   } catch (e) {
     send({ type: "error", message: e.message });
