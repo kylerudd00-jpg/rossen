@@ -173,12 +173,12 @@ function PostCard({ post }) {
         {rendering && <div className="post-preview-loader"><span className="spinner" /></div>}
         {previewUrl && <img src={previewUrl} alt={post.brand} style={{ opacity: rendering ? 0 : 1 }} />}
         {!rendering && !previewUrl && <div className="post-preview-error">Preview unavailable</div>}
-        {candidates.length > 1 && (
+        {candidates.length > 0 && (
           <button
             className="photo-cycle-btn"
             onClick={() => setImageIdx((i) => (i + 1) % candidates.length)}
           >
-            {imageIdx + 1} / {candidates.length}  Next Photo
+            {imageIdx + 1} / {candidates.length} &nbsp;Next Photo
           </button>
         )}
       </div>
