@@ -237,7 +237,7 @@ export async function researchStoriesWithOpenAI(env = {}, progress = () => {}) {
   const apiKey = env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
-  const count = envNumber(env, "OPENAI_STORY_COUNT", 12);
+  const count = envNumber(env, "OPENAI_STORY_COUNT", 24);
   const model = env.OPENAI_RESEARCH_MODEL || DEFAULT_RESEARCH_MODEL;
   const reasoningEffort = env.OPENAI_REASONING_EFFORT || "medium";
   const timeoutMs = envNumber(env, "OPENAI_RESEARCH_TIMEOUT_MS", 110000);

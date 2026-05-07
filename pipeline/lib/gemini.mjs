@@ -46,14 +46,18 @@ async function callGroq(systemPrompt, userContent, apiKey, { maxTokens = 1024, t
   return data.choices?.[0]?.message?.content?.trim() || "";
 }
 
+function isRateLimitError(error) {
+  return /429|quota|rate limit|resource exhausted/i.test(error?.message || "");
+}
+
 // Try Gemini first; fall back to Groq if Gemini quota is exhausted
 export async function gemini(systemPrompt, userContent, { geminiKey, groqKey } = {}, opts = {}) {
   if (geminiKey) {
     try {
       return await callGemini(systemPrompt, userContent, geminiKey, opts);
     } catch (e) {
-      if (!e.message.includes("429") && !e.message.includes("quota")) throw e;
-      console.warn("[ai] Gemini quota hit, falling back to Groq");
+      if (!isRateLimitError(e)) throw e;
+      console.warn("[ai] Gemini quota/rate-limit hit, falling back to Groq");
     }
   }
   if (groqKey) {

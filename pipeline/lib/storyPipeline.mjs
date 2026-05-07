@@ -23,12 +23,17 @@ const BRAND_PATTERNS = [
   [/\bwendy'?s\b/, "WENDY'S"],
   [/\btrader\s+joe'?s?\b/, "TRADER JOE'S"],
   [/\baldi\b/, "ALDI"],
+  [/\bzapp'?s\b/, "ZAPP'S"],
+  [/\bdirty\s+(?:potato\s+)?chips?\b/, "DIRTY CHIPS"],
+  [/\butz\b/, "UTZ"],
+  [/\bgood\s*&\s*gather\b|\bgood\s+and\s+gather\b/, "GOOD & GATHER"],
   [/\bhome\s+depot\b/, "HOME DEPOT"],
   [/\blowe'?s\b/, "LOWE'S"],
   [/\bamazon\b/, "AMAZON"],
   [/\bbed\s+bath\b/, "BED BATH & BEYOND"],
   [/\bchurch'?s\b/, "CHURCH'S"],
   [/\bpotbelly\b/, "POTBELLY"],
+  [/\bwhite\s+castle\b/, "WHITE CASTLE"],
   [/\bkroger\b/, "KROGER"],
   [/\bpublix\b/, "PUBLIX"],
   [/\bwhole\s+foods\b/, "WHOLE FOODS"],
@@ -44,7 +49,7 @@ const BRAND_PATTERNS = [
   [/\bnordstrom\b/, "NORDSTROM"],
   [/\bmacy'?s\b/, "MACY'S"],
   [/\bkohl'?s\b/, "KOHL'S"],
-  [/\bbest\s+buy\b/, "BEST BUY"],
+  [/\bbest\s+buy\b(?!\s+now)/, "BEST BUY"],
   [/\bstarbucks\b/, "STARBUCKS"],
   [/\bdunkin'?\b/, "DUNKIN'"],
   [/\bchick.?fil.?a\b/, "CHICK-FIL-A"],
@@ -64,6 +69,7 @@ const BRAND_PATTERNS = [
   [/\blidl\b/, "LIDL"],
   [/\bcircle\s*k\b/, "CIRCLE K"],
   [/\b7.?eleven\b/, "7-ELEVEN"],
+  [/\b7\s*brew\b|\bseven\s+brew\b/, "7 BREW"],
   [/\bpetco\b/, "PETCO"],
   [/\bpetsmart\b/, "PETSMART"],
   [/\bulta\b/, "ULTA"],
@@ -93,6 +99,13 @@ const BRAND_PATTERNS = [
   [/\bpanda\s+express\b/, "PANDA EXPRESS"],
   [/\bjamba\b/, "JAMBA"],
   [/\bbaskin.?robbins\b/, "BASKIN-ROBBINS"],
+  [/\bkrispy\s+kreme\b/, "KRISPY KREME"],
+  [/\bsweetgreen\b/, "SWEETGREEN"],
+  [/\bregal\s+(?:cinemas?|movies?)\b|\bregmovies\b/, "REGAL CINEMAS"],
+  [/\bplanet\s+fitness\b/, "PLANET FITNESS"],
+  [/\bvive\s+health\b/, "VIVE HEALTH"],
+  [/\bgourmia\b/, "GOURMIA"],
+  [/\bthermos\b/, "THERMOS"],
   [/\bcold\s+stone\b/, "COLD STONE"],
   [/\bdollar\s+shave\b/, "DOLLAR SHAVE CLUB"],
   [/\bwayfair\b/, "WAYFAIR"],
@@ -247,9 +260,10 @@ function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
 
   return candidates.filter((c) => {
     const text = `${c.title} ${c.rawSummary}`.toLowerCase();
+    const isSafetyAlert = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis|nhtsa|salmonella|listeria|burn|injur|death\b/i.test(text);
 
-    // Hard date cutoff — nothing older than 8 days
-    if (!isRecent(c.rawPubDate)) return false;
+    // Deals expire quickly; safety alerts can remain actionable for weeks.
+    if (!isRecent(c.rawPubDate, isSafetyAlert ? 90 : 8)) return false;
     // Hard kill — definitively off-topic
     if (HARD_SKIP.some((p) => p.test(text))) return false;
     // Must be a recognized brand
@@ -322,11 +336,11 @@ TO PASS THE TEST, a selected article must have at least ONE of:
   ✓ A specific date or deadline
   ✓ A specific legal claim or safety finding
 
-PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Panera, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
+PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
 For each selected article, identify the ONE specific brand with the most concrete deal. Return that brand name.
 
-Return ONLY a JSON array of up to 15 selected stories. [] if nothing qualifies. No other text.
+Return ONLY a JSON array of up to 24 selected stories. [] if nothing qualifies. No other text.
 [{"id":"...","brand":"BRAND NAME ALL CAPS"}, ...]`;
 
 // ─── Fact extraction (replaces "write a headline" approach) ──────────────────
@@ -543,22 +557,70 @@ function fallbackHeadlineForCandidate(candidate) {
   return formatHeadlineFromFacts(brandName, offer || strippedTitle.slice(0, 55) || title.slice(0, 50), detail);
 }
 
-function fallbackStoriesWithHeadlines(candidates, limit = 12) {
+function storyTopicFingerprint(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  const category = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis\b/.test(text)
+    ? "alert"
+    : /\bfree|bogo|buy one|get one|\$\d|\d+%\s+off|deal|offer|promo/.test(text)
+      ? "deal"
+      : /\bnew|launch|returning|returns|updated|added\b/.test(text)
+        ? "update"
+        : "story";
+  const risk = /\bsalmonella\b/.test(text) ? "salmonella"
+    : /\bglass\b/.test(text) ? "glass"
+      : /\bburn|fire\b/.test(text) ? "burn"
+        : /\bdeath|asphyxiation|entrapment\b/.test(text) ? "death"
+          : /\ballergen|shellfish|undeclared\b/.test(text) ? "allergen"
+            : "";
+  const productSignals = [
+    [/\bzapp'?s\b|\bdirty\s+(?:potato\s+)?chips?\b|\butz\b|\bpotato\s+chips?\b/, "potato-chips"],
+    [/\bcr[eè]me\s+br[uû]l[eé]e\b|\bdessert\b/, "dessert"],
+    [/\bfrozen\s+pizza\b|\bpizza\b/, "pizza"],
+    [/\bsnack\s+mix(?:es)?\b|\bsquirrel\s+brand\b|\bfisher\b|\bsouthern\s+style\s+nuts\b/, "snack-mix"],
+    [/\bpressure\s+cooker\b|\bgourmia\b/, "pressure-cooker"],
+    [/\badult\s+bed\s+rails?\b|\bbed\s+rails?\b|\bvive\s+health\b/, "bed-rails"],
+    [/\bthermos\b|\bstainless\s+king\b|\bfood\s+jars?\b|\bbottles?\b/, "food-jars"],
+    [/\bhot\s+dog\s+combo\b/, "hot-dog-combo"],
+    [/\btacos?\b/, "tacos"],
+    [/\bburgers?\b/, "burgers"],
+    [/\bscoops?\b|\bice\s+cream\b/, "ice-cream"],
+    [/\bkoozie\b|\bbrewsie\b/, "koozie"],
+    [/\bminis?\b|\bdoughnuts?\b|\bdonuts?\b/, "doughnuts"],
+    [/\bpoppi\b|\bdrinks?\b|\brefreshers?\b|\bsodas?\b/, "drinks"],
+    [/\bwraps?\b/, "wraps"],
+    [/\bcooking\s+classes?\b|\bskills\s+series\b/, "cooking-classes"],
+    [/\bmovie\s+tickets?\b|\bsummer\s+movie\s+express\b/, "movie-tickets"],
+    [/\bsummer\s+passes?\b|\bteen\s+passes?\b/, "teen-passes"],
+  ];
+  const productMatch = productSignals.find(([pattern]) => pattern.test(text));
+  const product = productMatch?.[1] || titleFingerprint(candidate.title);
+
+  return productMatch
+    ? [category, product].join(":")
+    : [category, product, risk].filter(Boolean).join(":");
+}
+
+function fallbackStoriesWithHeadlines(candidates, limit = 24) {
   const scored = candidates
     .map(scoreCandidate)
     .sort((left, right) => right.weightedTotal - left.weightedTotal);
   const selected = [];
   const brandCounts = new Map();
+  const seenTopics = new Set();
 
   for (const candidate of scored) {
     const brand = candidate.brand || "RETAIL";
     const count = brandCounts.get(brand) || 0;
     if (count >= 2) continue;
 
+    const topic = storyTopicFingerprint(candidate);
+    if (seenTopics.has(topic)) continue;
+
     const headline = fallbackHeadlineForCandidate(candidate);
     if (!headline.includes("\n")) continue;
     selected.push({ ...candidate, headline, headlineProvider: "fallback" });
     brandCounts.set(brand, count + 1);
+    seenTopics.add(topic);
 
     if (selected.length >= limit) break;
   }
@@ -635,7 +697,7 @@ async function runFilterPass(candidates, keys) {
   let picks = [];
 
   if (hasGemini) {
-    const text = await gemini(FILTER_PROMPT, JSON.stringify(payload), keys, { maxTokens: 600 });
+    const text = await gemini(FILTER_PROMPT, JSON.stringify(payload), keys, { maxTokens: 900 });
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
       try { picks = JSON.parse(match[0]); } catch {}
@@ -654,11 +716,11 @@ async function runFilterPass(candidates, keys) {
           if (Array.isArray(batch)) picks.push(...batch);
         } catch {}
       }
-      if (picks.length >= 15) break;
+      if (picks.length >= 24) break;
     }
   }
 
-  return Array.isArray(picks) ? picks.slice(0, 15) : [];
+  return Array.isArray(picks) ? picks.slice(0, 24) : [];
 }
 
 // Run up to `concurrency` promises at a time (avoids hammering Gemini rate limit)
@@ -711,6 +773,10 @@ async function filterAndRewriteWithAI(candidates, keys, progress) {
 
   const withHeadlines = results.filter(Boolean);
   console.log(`[pipeline] Filtered to ${picks.length}, wrote ${withHeadlines.length} headlines`);
+  const minimumUsable = Math.min(6, Math.max(1, Math.ceil(picks.length * 0.4)));
+  if (withHeadlines.length < minimumUsable) {
+    throw new Error(`AI wrote only ${withHeadlines.length} usable headline${withHeadlines.length === 1 ? "" : "s"}`);
+  }
   return withHeadlines;
 }
 

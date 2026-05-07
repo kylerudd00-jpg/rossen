@@ -1,4 +1,4 @@
-import { tavilySearch } from "./agentSearch.mjs";
+import { executeSearch } from "./agentSearch.mjs";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const DEFAULT_MODEL = "gemini-2.0-flash";
@@ -108,7 +108,28 @@ function extractJson(text) {
 function buildQueries() {
   const now = new Date();
   const m = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const year = now.getFullYear();
   return [
+    `Aldi creme brulee recall glass contamination ${m}`,
+    `Zapp's Dirty potato chips recall salmonella ${m}`,
+    `Good & Gather snack mix recall salmonella ${m}`,
+    `Aldi Walmart frozen pizza salmonella alert ${m}`,
+    `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
+    `Vive Health adult bed rails recall deaths CPSC ${year}`,
+    `White Castle BOGO combo meals Mother's Day ${m}`,
+    `Pizza Hut heart shaped pizza Mother's Day ${m}`,
+    `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
+    `7 Brew free koozie Mother's Day May 10 ${year}`,
+    `Krispy Kreme Mother's Day minis box May ${year}`,
+    `Shake Shack free burgers every week May ${year}`,
+    `Chipotle $2.50 tacos June 2 ${year}`,
+    `Costco hot dog combo water option ${m}`,
+    `Subway free Poppi drink Sub Club May 7 ${year}`,
+    `McDonald's refreshers crafted sodas launching nationwide ${year}`,
+    `Sweetgreen wraps launch May 6 ${year}`,
+    `Williams Sonoma free cooking classes every Sunday May ${year}`,
+    `Regal $1 movie tickets summer movie express June 1 ${year}`,
+    `Planet Fitness free summer pass teens sign up May 18 ${year}`,
     `Starbucks free drink offer ${m}`,
     `McDonald's free deal BOGO ${m}`,
     `Chipotle deal offer ${m}`,
@@ -127,8 +148,7 @@ function buildQueries() {
   ];
 }
 
-async function gatherArticles({ tavilyKey }) {
-  if (!tavilyKey) throw new Error("TAVILY_API_KEY is required for story research");
+async function gatherArticles({ braveKey, tavilyKey }) {
   const queries = buildQueries();
   const seenUrls = new Set();
   const all = [];
@@ -138,16 +158,20 @@ async function gatherArticles({ tavilyKey }) {
   for (let i = 0; i < queries.length; i += BATCH) {
     const batch = queries.slice(i, i + BATCH);
     const settled = await Promise.allSettled(
-      batch.map((q) => tavilySearch(q, tavilyKey, 8).catch(() => []))
+      batch.map((q) => executeSearch(q, { braveKey, tavilyKey, count: 8 }).catch(() => []))
     );
-    for (const r of settled) {
+    for (const [resultIndex, r] of settled.entries()) {
       if (r.status !== "fulfilled") continue;
+      const query = batch[resultIndex] || "";
       for (const a of r.value) {
         if (!a.sourceUrl || !a.title) continue;
         const key = a.sourceUrl.toLowerCase().replace(/[?#].*$/, "");
         if (seenUrls.has(key)) continue;
         seenUrls.add(key);
-        all.push(a);
+        all.push({
+          ...a,
+          rawSummary: [a.rawSummary, query].filter(Boolean).join(" "),
+        });
       }
     }
     if (i + BATCH < queries.length) await new Promise((r) => setTimeout(r, 400));
@@ -334,13 +358,14 @@ async function _doResearch(env, progress) {
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
 
+  const braveKey = env.BRAVE_API_KEY;
   const tavilyKey = env.TAVILY_API_KEY;
-  const count = envNumber(env, "GEMINI_STORY_COUNT", 12);
+  const count = envNumber(env, "GEMINI_STORY_COUNT", 24);
   const model = env.GEMINI_RESEARCH_MODEL || DEFAULT_MODEL;
   const timeoutMs = envNumber(env, "GEMINI_RESEARCH_TIMEOUT_MS", 60000);
 
   progress("Searching for today's consumer stories...", 8);
-  const articles = await gatherArticles({ tavilyKey });
+  const articles = await gatherArticles({ braveKey, tavilyKey });
 
   if (articles.length === 0) throw new Error("No articles found from search APIs");
 

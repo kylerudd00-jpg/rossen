@@ -116,7 +116,7 @@ Prioritize: named brand, named data exposed, senior-targeted scams
 Reject: technical/corporate breaches with no consumer action step
 
 ━━━ PRIORITY BRANDS ━━━
-Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, Olive Garden, Applebee's, Red Lobster, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Panera, JetBlue, Delta, United, Southwest, Uber, DoorDash, Instacart, Ticketmaster, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
+Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Uber, DoorDash, Instacart, Ticketmaster, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
 ━━━ PREFERRED SOURCES ━━━
 Official first: CPSC, FDA, USDA, FTC, NHTSA, brand press releases, official promo pages
@@ -206,17 +206,22 @@ async function googleNewsSearch(query, count = 10) {
 // matching their free quota ratio (2000 vs 1000) so both exhaust together.
 let _searchCounter = 0;
 
-export function executeSearch(query, { braveKey, tavilyKey, count = 10 }) {
+export async function executeSearch(query, { braveKey, tavilyKey, count = 10 }) {
   const backends = [];
   if (braveKey) backends.push((q) => braveSearch(q, braveKey, count));
   if (braveKey) backends.push((q) => braveSearch(q, braveKey, count)); // 2:1 weight
   if (tavilyKey) backends.push((q) => tavilySearch(q, tavilyKey, count));
 
   if (backends.length > 0) {
-    const pick = backends[_searchCounter % backends.length];
+    const start = _searchCounter % backends.length;
     _searchCounter++;
-    return pick(query).catch(() => googleNewsSearch(query, count).catch(() => []));
+    for (let i = 0; i < backends.length; i++) {
+      const pick = backends[(start + i) % backends.length];
+      const results = await pick(query).catch(() => []);
+      if (results.length > 0) return results;
+    }
   }
+
   return googleNewsSearch(query, count).catch(() => []);
 }
 
@@ -226,6 +231,81 @@ function trimForAgent(results) {
     description: (r.rawSummary || "").slice(0, 160),
     published: r.publishedAt || "",
   }));
+}
+
+function buildDirectSearchQueries() {
+  const now = new Date();
+  const monthYear = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const year = now.getFullYear();
+
+  return [
+    `Aldi creme brulee recall glass contamination ${monthYear}`,
+    `Zapp's Dirty potato chips recall salmonella ${monthYear}`,
+    `Good & Gather snack mix recall salmonella ${monthYear}`,
+    `Aldi Walmart frozen pizza salmonella alert ${monthYear}`,
+    `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
+    `Vive Health adult bed rails recall deaths CPSC ${year}`,
+    `White Castle BOGO combo meals Mother's Day ${monthYear}`,
+    `Pizza Hut heart shaped pizza Mother's Day ${monthYear}`,
+    `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
+    `7 Brew free koozie Mother's Day May 10 ${year}`,
+    `Krispy Kreme Mother's Day minis box May ${year}`,
+    `Shake Shack free burgers every week May ${year}`,
+    `Chipotle $2.50 tacos June 2 ${year}`,
+    `Costco hot dog combo water option ${monthYear}`,
+    `Subway free Poppi drink Sub Club May 7 ${year}`,
+    `McDonald's refreshers crafted sodas launching nationwide ${year}`,
+    `Sweetgreen wraps launch May 6 ${year}`,
+    `Williams Sonoma free cooking classes every Sunday May ${year}`,
+    `Regal $1 movie tickets summer movie express June 1 ${year}`,
+    `Planet Fitness free summer pass teens sign up May 18 ${year}`,
+    `Starbucks free drink offer ${monthYear}`,
+    `McDonald's deal BOGO ${monthYear}`,
+    `Chipotle deal offer ${monthYear}`,
+    `Dunkin free coffee ${monthYear}`,
+    `restaurant free food teachers nurses ${monthYear}`,
+    `Costco Walmart Target deal promotion ${monthYear}`,
+    `CPSC product recall ${monthYear}`,
+    `FDA food recall ${monthYear}`,
+    `USDA food recall ${monthYear}`,
+    `consumer class action settlement brand ${year}`,
+    `retail data breach customer ${year}`,
+    `FTC scam alert seniors ${monthYear}`,
+    `major brand policy change fee increase ${monthYear}`,
+    `Netflix Disney+ subscription price increase ${year}`,
+  ];
+}
+
+async function runDirectSearchFallback(searchFn, { maxQueries = 40 } = {}) {
+  const queries = buildDirectSearchQueries().slice(0, maxQueries);
+  const allArticles = [];
+  const seenUrls = new Set();
+  const batchSize = 4;
+
+  for (let i = 0; i < queries.length; i += batchSize) {
+    const batch = queries.slice(i, i + batchSize);
+    const settled = await Promise.allSettled(batch.map((query) => searchFn(query).catch(() => [])));
+
+    for (const [resultIndex, result] of settled.entries()) {
+      if (result.status !== "fulfilled") continue;
+      const query = batch[resultIndex] || "";
+      for (const article of result.value || []) {
+        if (!article?.title || !article?.sourceUrl) continue;
+        const key = article.sourceUrl.toLowerCase().replace(/[?#].*$/, "");
+        if (seenUrls.has(key)) continue;
+        seenUrls.add(key);
+        allArticles.push({
+          ...article,
+          rawSummary: [article.rawSummary, query].filter(Boolean).join(" "),
+        });
+      }
+    }
+
+    if (i + batchSize < queries.length) await new Promise((r) => setTimeout(r, 300));
+  }
+
+  console.log(`[agent] Direct search fallback found ${allArticles.length} articles`);
+  return allArticles;
 }
 
 // ─── Gemini agentic loop ──────────────────────────────────────────────────────
@@ -451,8 +531,10 @@ export async function agentSearch({
 
   if (groqKey) {
     progress?.("Agent searching for stories…", 8);
-    return runGroqAgent(groqKey, searchFn, { maxRounds });
+    const results = await runGroqAgent(groqKey, searchFn, { maxRounds });
+    if (results.length > 0) return results;
   }
 
-  return [];
+  progress?.("Searching news feeds directly…", 12);
+  return runDirectSearchFallback(searchFn);
 }
