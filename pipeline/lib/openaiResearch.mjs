@@ -44,7 +44,7 @@ function hasUsefulThirdLine(line) {
   if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
     return false;
   }
-  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|starting|starts?|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|after|before|purchase|code|customers?|cheap|uproar|backlash|warning|issued|costs?|under|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
 }
 
 function isWeakHeadlineLines(lines) {
@@ -163,6 +163,7 @@ Reject:
 - vague shopping tips, listicles, roundups, earnings, investor news, employment news, local-only openings, and old/expired deals
 - articles where the only hook is "deals are available" or "several brands are offering freebies"
 - merged recall roundup articles that combine unrelated products/brands
+- generic deal roundups unless the source/snippet confirms one brand's exact item, condition, and date
 - headlines that would need vague phrases like "popular item", "some products", "new deal available", "customers affected", or "limited time"
 - public health alerts/warnings that can only be headlined by falsely calling them recalls
 - anything you cannot verify from a source URL
@@ -190,6 +191,10 @@ GOOD & GATHER / SNACK MIXES RECALLED / POSSIBLE SALMONELLA RISK
 BEST BUY / PRESSURE COOKERS WARNING / CPSC SAYS STOP USING IMMEDIATELY
 COSTCO / $1.50 HOT DOG COMBO UPDATED / WATER NOW AN OPTION
 SHAKE SHACK / FREE BURGERS EVERY WEEK / WITH $10+ PURCHASE ALL MAY
+RAISING CANE'S / FREE BOX COMBO / WITH PURCHASE MAY 10TH–11TH
+DENNY'S / $10 OFF $30+ ORDERS / MAY 9TH–11TH WITH CODE MOMDAY
+ARBY'S / BOGO SANDWICHES / MAY 8TH–10TH IN APP
+WENDY'S / SWEET & SOUR SAUCE RETURNS / AFTER CUSTOMER UPROAR
 
 Before finalizing each story, ask: would a 65-year-old understand this instantly and know why they should care? If no, skip or rewrite.
 
@@ -221,6 +226,7 @@ Prioritize:
 3. lawsuits, settlements, hidden fees, data breaches, and scams with clear consumer impact
 4. major retail/restaurant/service policy changes
 5. new or returning menu items only when the item is specific and timely
+6. value/backlash stories only when the product and consumer complaint are simple
 
 Each returned story must have one source URL and an exact 3-line headline array. Return fewer than ${count} if fewer truly qualify.`;
 }

@@ -34,13 +34,13 @@ Do NOT return articles with titles like:
 - "Every deal available this weekend"
 - "X places offering discounts for Y"
 
-These are listicle articles. They have no specific deal. They cannot be turned into a useful headline.
+These are listicle articles. They are only useful if the search result confirms one brand's exact item, condition, and date. Do not return them as merged roundup stories.
 
 ONLY return articles that are about ONE specific brand's ONE specific action:
 ✓ "Chipotle offering $2.50 tacos at select locations through June 2" — ONE brand, ONE price, ONE date
 ✓ "CPSC recalls Gourmia air fryers sold at Costco after fire reports" — ONE brand, ONE product, ONE danger
 ✓ "Starbucks giving free drink to teachers May 5-9 with school ID" — ONE brand, ONE deal, ONE condition
-✗ "Teacher appreciation week: 12 restaurants with free food and deals" — SKIP, too vague
+✗ "Teacher appreciation week: 12 restaurants with free food and deals" — SKIP unless the result snippet confirms one brand's exact deal
 
 ━━━ FRESHNESS ━━━
 - Prioritize last 7 days
@@ -63,6 +63,11 @@ Search for specific brand deals, not roundup articles. Use queries like:
 - "BOGO Burger King ${monthYear}"
 - "Wendy's free deal ${monthYear}"
 - "Planet Fitness free pass ${monthYear}"
+- "Raising Cane's free Box Combo ${monthYear}"
+- "Denny's code deal Mother's Day ${monthYear}"
+- "Arby's BOGO sandwiches app ${monthYear}"
+- "Scooter's Coffee BOGO drinks ${monthYear}"
+- "Aroma Joe's free drink ${monthYear}"
 
 Prioritize: named free item, exact price, named brand, specific date or eligibility
 Reject: roundup articles covering many brands, vague "deals available" stories, expired offers
@@ -100,6 +105,8 @@ Reject: investor lawsuits, employment lawsuits, complex antitrust, hyperlocal ca
 - "airline baggage fee change 2026"
 - "fast food new menu item ${monthYear}"
 - "restaurant menu returning item ${monthYear}"
+- "McDonald's value menu under $3 ${monthYear}"
+- "Wendy's sauce returns customer backlash ${monthYear}"
 
 Prioritize: specific policy change, specific new or removed item, specific fee change
 Reject: vague "things are changing" stories, earnings reports
@@ -116,7 +123,7 @@ Prioritize: named brand, named data exposed, senior-targeted scams
 Reject: technical/corporate breaches with no consumer action step
 
 ━━━ PRIORITY BRANDS ━━━
-Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Uber, DoorDash, Instacart, Ticketmaster, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
+Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Arby's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Scooter's Coffee, Aroma Joe's, Fazoli's, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Uber, DoorDash, Instacart, Ticketmaster, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
 ━━━ PREFERRED SOURCES ━━━
 Official first: CPSC, FDA, USDA, FTC, NHTSA, brand press releases, official promo pages
@@ -246,11 +253,23 @@ function buildDirectSearchQueries() {
     `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
     `Vive Health adult bed rails recall deaths CPSC ${year}`,
     `White Castle BOGO combo meals May 9 11 ${year}`,
+    `Raising Cane's free box combo with purchase May 10 11 ${year}`,
+    `Denny's $10 off $30 orders code MOMDAY May 9 11 ${year}`,
+    `Fazoli's free pasta entree purchase code MOTHER26 Mother's Day ${year}`,
+    `Scooter's Coffee BOGO drinks May 7 10 after 11 AM ${year}`,
+    `Aroma Joe's free 24 oz iced drink May 10 ${year}`,
+    `Arby's BOGO sandwiches May 8 10 app ${year}`,
     `Pizza Hut heart shaped pizza Mother's Day ${monthYear}`,
     `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
     `7 Brew free koozie Mother's Day May 10 ${year}`,
     `Krispy Kreme Mother's Day minis box May ${year}`,
+    `Krispy Kreme 16 count Minis for Mom box May 7 10 ${year}`,
     `Shake Shack free burgers every week May ${year}`,
+    `Shake Shack free ShackBurger nurses May 4 12 purchase ${year}`,
+    `McDonald's $2.50 McDouble backlash customers say not cheap ${monthYear}`,
+    `McDonald's value menu 10 items under $3 ${monthYear}`,
+    `Burger King beef cost warning prices rising ${monthYear}`,
+    `Wendy's sweet and sour sauce returns customer uproar ${monthYear}`,
     `Chipotle $2.50 tacos June 2 ${year}`,
     `Costco hot dog combo water option ${monthYear}`,
     `Subway free Poppi drink Sub Club May 7 ${year}`,
@@ -276,7 +295,7 @@ function buildDirectSearchQueries() {
   ];
 }
 
-async function runDirectSearchFallback(searchFn, { maxQueries = 40 } = {}) {
+async function runDirectSearchFallback(searchFn, { maxQueries = 60 } = {}) {
   const queries = buildDirectSearchQueries().slice(0, maxQueries);
   const allArticles = [];
   const seenUrls = new Set();

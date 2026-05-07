@@ -38,7 +38,7 @@ function hasUsefulThirdLine(line) {
   if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
     return false;
   }
-  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|starting|starts?|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|after|before|purchase|code|customers?|cheap|uproar|backlash|warning|issued|costs?|under|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
 }
 
 function isWeakHeadlineLines(lines) {
@@ -139,11 +139,23 @@ function buildQueries() {
     `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
     `Vive Health adult bed rails recall deaths CPSC ${year}`,
     `White Castle BOGO combo meals May 9 11 ${year}`,
+    `Raising Cane's free box combo with purchase May 10 11 ${year}`,
+    `Denny's $10 off $30 orders code MOMDAY May 9 11 ${year}`,
+    `Fazoli's free pasta entree purchase code MOTHER26 Mother's Day ${year}`,
+    `Scooter's Coffee BOGO drinks May 7 10 after 11 AM ${year}`,
+    `Aroma Joe's free 24 oz iced drink May 10 ${year}`,
+    `Arby's BOGO sandwiches May 8 10 app ${year}`,
     `Pizza Hut heart shaped pizza Mother's Day ${m}`,
     `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
     `7 Brew free koozie Mother's Day May 10 ${year}`,
     `Krispy Kreme Mother's Day minis box May ${year}`,
+    `Krispy Kreme 16 count Minis for Mom box May 7 10 ${year}`,
     `Shake Shack free burgers every week May ${year}`,
+    `Shake Shack free ShackBurger nurses May 4 12 purchase ${year}`,
+    `McDonald's $2.50 McDouble backlash customers say not cheap ${m}`,
+    `McDonald's value menu 10 items under $3 ${m}`,
+    `Burger King beef cost warning prices rising ${m}`,
+    `Wendy's sweet and sour sauce returns customer uproar ${m}`,
     `Chipotle $2.50 tacos June 2 ${year}`,
     `Costco hot dog combo water option ${m}`,
     `Subway free Poppi drink Sub Club May 7 ${year}`,
@@ -292,6 +304,7 @@ HARD REJECT — never pick these:
 - "Prices may rise" with no named product or brand action
 - Logistics, supply chain, warehouse, distribution stories
 - Multi-recall roundup articles that blend unrelated products/brands into one card
+- Generic deal roundups unless the article/snippet confirms one brand's exact item, condition, and date
 - Old or expired deals
 - Local-only stories unless a national brand has a clear national consumer angle
 - Weak or unverified sources where the URL does not confirm the claim
@@ -357,6 +370,10 @@ GOOD EXAMPLES — match this quality:
   COSTCO / $1.50 HOT DOG COMBO UPDATED / WATER NOW AN OPTION
   BEST BUY / PRESSURE COOKERS WARNING / CPSC SAYS STOP USING IMMEDIATELY
   SHAKE SHACK / FREE BURGERS EVERY WEEK / WITH $10+ PURCHASE ALL MAY
+  RAISING CANE'S / FREE BOX COMBO / WITH PURCHASE MAY 10TH–11TH
+  DENNY'S / $10 OFF $30+ ORDERS / MAY 9TH–11TH WITH CODE MOMDAY
+  ARBY'S / BOGO SANDWICHES / MAY 8TH–10TH IN APP
+  WENDY'S / SWEET & SOUR SAUCE RETURNS / AFTER CUSTOMER UPROAR
   THERMOS / 8.2 MILLION JARS RECALLED / VISION LOSS INJURIES REPORTED
   TRADER JOE'S / SUED OVER "LOW ACID" COFFEE / LAWSUIT CLAIMS LABEL MISLED BUYERS
   JETBLUE / SUED FOR "SURVEILLANCE PRICING" / FARES MAY CHANGE BASED ON YOUR DATA

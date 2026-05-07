@@ -20,6 +20,7 @@ const BRAND_PATTERNS = [
   [/\bsam'?s\s+club\b/, "SAM'S CLUB"],
   [/\bsubway\b/, "SUBWAY"],
   [/\bmcdonald'?s?\b/, "MCDONALD'S"],
+  [/\barby'?s\b/, "ARBY'S"],
   [/\btaco\s+bell\b/, "TACO BELL"],
   [/\bwendy'?s\b/, "WENDY'S"],
   [/\btrader\s+joe'?s?\b/, "TRADER JOE'S"],
@@ -70,6 +71,8 @@ const BRAND_PATTERNS = [
   [/\bcircle\s*k\b/, "CIRCLE K"],
   [/\b7.?eleven\b/, "7-ELEVEN"],
   [/\b7\s*brew\b|\bseven\s+brew\b/, "7 BREW"],
+  [/\bscooter'?s\s+coffee\b|\bscooters\s+coffee\b/, "SCOOTER'S COFFEE"],
+  [/\baroma\s+joe'?s\b/, "AROMA JOE'S"],
   [/\bpetco\b/, "PETCO"],
   [/\bpetsmart\b/, "PETSMART"],
   [/\bulta\b/, "ULTA"],
@@ -80,6 +83,7 @@ const BRAND_PATTERNS = [
   [/\bkona\s+ice\b/, "KONA ICE"],
   [/\bqdoba\b/, "QDOBA"],
   [/\bcane'?s\b|\braising\s+cane\b/, "RAISING CANE'S"],
+  [/\bfazoli'?s\b/, "FAZOLI'S"],
   [/\bsonic\b/, "SONIC"],
   [/\bdairy\s+queen\b/, "DAIRY QUEEN"],
   [/\bbuffalo\s+wild\s+wings\b|\bbww\b/, "BUFFALO WILD WINGS"],
@@ -280,6 +284,17 @@ const HARD_SKIP = [
   /\b(complete|ultimate|full)\s+(guide|list|roundup)\b/i,
 ];
 
+function hasConcreteSingleBrandHook(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  if (!candidate.brand || candidate.brand === "RETAIL") return false;
+
+  const hasConcreteOffer = /\b(free|bogo|buy\s+one|get\s+one|\$\s?\d|\d+%\s+off|code\s+[a-z0-9]+|with\s+purchase)\b/i.test(text);
+  const hasTimingOrCatch = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|through\b|starting\b|starts?\b|weekend\b|after\s+\d{1,2}|rewards?|app\b|with\s+purchase|code\s+[a-z0-9]+/i.test(text);
+  const hasSpecificThing = /\b(box\s+combo|combo\s+meals?|scoops?|koozie|brewsie|pasta|sandwich(?:es)?|drinks?|iced\s+drink|heart-shaped\s+pizzas?|minis?\s+for\s+mom|movie\s+tickets?|shackburger|orders?|mcdouble|sweet\s*&?\s*sour\s+sauce)\b/i.test(text);
+
+  return hasConcreteOffer && hasTimingOrCatch && hasSpecificThing;
+}
+
 function titleFingerprint(title) {
   return title
     .toLowerCase()
@@ -325,7 +340,7 @@ function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
     if (!isRecent(c.rawPubDate, isSafetyAlert ? 45 : 8)) return false;
     if (isExpiredDeal(c)) return false;
     // Hard kill — definitively off-topic
-    if (HARD_SKIP.some((p) => p.test(text))) return false;
+    if (HARD_SKIP.some((p) => p.test(text)) && !hasConcreteSingleBrandHook(c)) return false;
     // Multi-recall summaries can merge unrelated brands into one confusing card.
     if (isMergedRecallRoundup(c)) return false;
     // Must be a recognized brand
@@ -393,7 +408,7 @@ HARD SKIP — do not select these even if they mention brand names:
 - Old stories, unless the safety action is still newly relevant
 - Local-only stories, unless a national brand has a clear national consumer angle
 - Weak or unverified sources where the source URL does not confirm the claim
-- Roundup/listicle articles (e.g. "10 restaurants with teacher deals", "Best Memorial Day sales", "Nurses week freebies at various chains") — SKIP these entirely unless the article is specifically about ONE brand's ONE concrete deal with a stated price, product name, or exact date
+- Roundup/listicle articles (e.g. "10 restaurants with teacher deals", "Best Memorial Day sales", "Nurses week freebies at various chains") — SKIP these unless the title/summary/source snippet clearly confirms ONE brand's ONE concrete deal with an exact item, condition, and date
 - Multi-recall roundup articles that blend unrelated products/brands into one story
 - Legal/business stories where the consumer impact needs a long explanation
 
@@ -404,7 +419,7 @@ TO PASS THE TEST, a selected article must have at least ONE of:
   ✓ A specific legal claim or safety finding
   ✓ A clear condition/risk/action that could become headline line 3
 
-PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
+PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Arby's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Scooter's Coffee, Aroma Joe's, Fazoli's, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
 For each selected article, identify the ONE specific brand with the most concrete deal. Return that brand name.
 
@@ -632,18 +647,26 @@ const HEADLINE_PRODUCT_RULES = [
   { key: "snack-mixes", pattern: /\bsnack\s+mix(?:es)?\b/, singular: "snack mix", plural: "snack mixes" },
   { key: "potato-chips", pattern: /\bpotato\s+chips?\b|\bzapp.?s\b|\bdirty\s+(?:potato\s+)?chips?\b|\butz\b/, singular: "potato chips", plural: "potato chips" },
   { key: "creme-brulee", pattern: /\bcr[eè]me\s+br[uû]l[eé]e\b|\bdessert\b/, singular: "crème brûlée", plural: "crème brûlée" },
+  { key: "mcdouble", pattern: /\bmcdouble\b/, singular: "McDouble", plural: "McDouble" },
+  { key: "value-menu", pattern: /\bvalue\s+menu\b|\bitems?\s+under\s+\$?3\b/, singular: "value menu", plural: "value menu" },
+  { key: "sweet-sour-sauce", pattern: /\bsweet\s*&?\s*sour\s+sauce\b/, singular: "sweet & sour sauce", plural: "sweet & sour sauce" },
   { key: "pressure-cookers", pattern: /\bpressure\s+cookers?\b|\bgourmia\b/, singular: "pressure cooker", plural: "pressure cookers" },
   { key: "bed-rails", pattern: /\badult\s+bed\s+rails?\b|\bbed\s+rails?\b|\bvive\s+health\b/, singular: "adult bed rail", plural: "adult bed rails" },
   { key: "jars", pattern: /\bstainless\s+king\b|\bfood\s+jars?\b|\bvacuum\s+jars?\b|\bthermos\b/, singular: "jar", plural: "jars" },
   { key: "scoops", pattern: /\bscoops?\b|\bice\s+cream\b/, singular: "scoop", plural: "scoops" },
+  { key: "box-combo", pattern: /\bbox\s+combo\b/, singular: "box combo", plural: "box combo" },
   { key: "combo-meals", pattern: /\bcombo\s+meals?\b/, singular: "combo meal", plural: "combo meals" },
+  { key: "shackburger", pattern: /\bshackburger\b/, singular: "ShackBurger", plural: "ShackBurger" },
   { key: "burgers", pattern: /\bburgers?\b/, singular: "burger", plural: "burgers" },
   { key: "tacos", pattern: /\btacos?\b/, singular: "taco", plural: "tacos" },
   { key: "hot-dog-combo", pattern: /\bhot\s+dog\s+combo\b/, singular: "hot dog combo", plural: "hot dog combo" },
   { key: "koozie", pattern: /\bkoozie\b|\bbrewsie\b/, singular: "koozie", plural: "koozies" },
   { key: "poppi-drink", pattern: /\bpoppi\b/, singular: "poppi drink", plural: "poppi drinks" },
+  { key: "iced-drink", pattern: /\b24\s*oz\b.{0,40}\biced\s+drink\b|\biced\s+drink\b.{0,40}\b24\s*oz\b/, singular: "24 oz iced drink", plural: "24 oz iced drink" },
   { key: "refreshers-crafted-sodas", pattern: /\brefreshers?\b.{0,80}\bcrafted\s+sodas?\b|\bcrafted\s+sodas?\b.{0,80}\brefreshers?\b/, singular: "refresher & crafted soda", plural: "refreshers & crafted sodas" },
   { key: "drinks", pattern: /\bdrinks?\b|\brefreshers?\b|\bsodas?\b/, singular: "drink", plural: "drinks" },
+  { key: "sandwiches", pattern: /\bsandwich(?:es)?\b/, singular: "sandwich", plural: "sandwiches" },
+  { key: "pasta", pattern: /\bpasta\b/, singular: "pasta", plural: "pasta" },
   { key: "wraps", pattern: /\bwraps?\b/, singular: "wrap", plural: "wraps" },
   { key: "cooking-classes", pattern: /\bcooking\s+classes?\b|\bskills\s+series\b/, singular: "cooking class", plural: "cooking classes" },
   { key: "movie-tickets", pattern: /\bmovie\s+tickets?\b|\bsummer\s+movie\s+express\b/, singular: "movie ticket", plural: "movie tickets" },
@@ -696,13 +719,21 @@ function detectConditionDetail(text) {
   const looseRange = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
   const single = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
   const through = text.match(/\bthrough\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
+  const starting = text.match(/\b(?:starting|starts?|begins?|sign-?ups?\s+start)\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
 
   if (range) details.push(`${displayMonth(range[1])} ${ordinalDay(range[2])}–${ordinalDay(range[3])} only`);
   else if (looseRange) details.push(`${displayMonth(looseRange[1])} ${ordinalDay(looseRange[2])}–${ordinalDay(looseRange[3])} only`);
   else if (through) details.push(`through ${displayMonth(through[1])} ${ordinalDay(through[2])}`);
+  else if (starting) details.push(`starting ${displayMonth(starting[1])} ${ordinalDay(starting[2])}`);
   else if (/\ball\s+may\b/i.test(text)) details.push("all may");
-  else if (single) details.push(`${displayMonth(single[1])} ${ordinalDay(single[2])}`);
+  else if (single) {
+    const singleDate = `${displayMonth(single[1])} ${ordinalDay(single[2])}`;
+    details.push(/\bonly\b/i.test(text) ? `${singleDate} only` : singleDate);
+  }
   else if (/\bmother'?s\s+day\b/i.test(text)) details.push("for Mother's Day weekend");
+
+  const afterTime = text.match(/\bafter\s+(\d{1,2})\s*(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)\b/i);
+  if (afterTime) details.push(`after ${afterTime[1]} ${afterTime[2].replace(/\./g, "").toUpperCase()}`);
 
   if (/\brewards?\s+members?\b|\brewards?\b/i.test(text)) details.push("for rewards members");
   else if (/\bsub\s+club\b/i.test(text)) details.push("for sub club members");
@@ -717,6 +748,10 @@ function detectConditionDetail(text) {
     || /\bwith\b.{0,30}\b(?:two|2)\b.{0,20}\b(?:medium|large)\b.{0,20}\bdrinks?\b/i.test(text)) {
     details.push("with 2 medium or large drinks");
   }
+  if (/\bwith\s+(?:an?\s+)?entr[eé]e\s+purchase\b/i.test(text)) details.push("with entrée purchase");
+  else if (/\bwith\s+purchase\b/i.test(text)) details.push("with purchase");
+  const code = text.match(/\bcode\s+([a-z0-9]+)\b/i);
+  if (code) details.push(`with code ${code[1].toUpperCase()}`);
   if (/\bselect\s+(?:locations|markets|cities)\b/i.test(text)) details.push("at select locations");
   if (/\bevery\s+sunday\b.{0,40}\bmay\b|\bmay\b.{0,40}\bevery\s+sunday\b/i.test(text)) details.push("every Sunday in May");
   if (/\bbottled\s+water\b|\bwater\s+now\s+an\s+option\b|\bwater\s+option\b/i.test(text)) details.push("water now an option");
@@ -731,6 +766,17 @@ function detectConditionDetail(text) {
   }
 
   return details.slice(0, 2).join(" ");
+}
+
+function extractDatePhrase(condition) {
+  return String(condition || "").match(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)(?:–\d{1,2}(?:st|nd|rd|th))?/i)?.[0] || "";
+}
+
+function detectDiscountOffer(text) {
+  const dollarOff = text.match(/\$(\d+(?:\.\d{2})?)\s*off\s*\$?(\d+)\+?\s*(?:orders?)?/i);
+  if (dollarOff) return `$${dollarOff[1]} off $${dollarOff[2]}+ orders`;
+  const percentOff = text.match(/\b(\d+)%\s*off\b/i);
+  return percentOff ? `${percentOff[1]}% off` : "";
 }
 
 function detectSafetyAction(text, productKey) {
@@ -753,7 +799,37 @@ function genericEditorialHeadline(candidate) {
   const brand = (candidate.brand || "RETAIL").toUpperCase();
   const condition = detectConditionDetail(text);
   const price = text.match(/\$\s?\d+(?:\.\d{2})?/);
+  const discount = detectDiscountOffer(text);
   const isRecallOrAlert = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis\b/.test(text);
+
+  if (brand === "MCDONALD'S" && /\bmcdouble\b/.test(text) && /\b(backlash|isn.?t\s+cheap|not\s+cheap|customers?\s+say|customers?\s+complain)\b/.test(text)) {
+    return formatHeadlineFromFacts(brand, "$2.50 McDouble backlash", "customers say it isn't cheap");
+  }
+
+  if (brand === "MCDONALD'S" && /\b(value\s+menu|value\s+push|value\s+meals?)\b/.test(text) && /\b10\b.{0,40}\bunder\s+\$?3\b|\bunder\s+\$?3\b.{0,40}\b10\b/.test(text)) {
+    return formatHeadlineFromFacts(brand, "new value menu push", "10 items under $3");
+  }
+
+  if (brand === "BURGER KING" && /\bprices?\b.{0,80}\b(ris|increase|higher)|\bbeef\s+costs?\b/.test(text)) {
+    return formatHeadlineFromFacts(brand, "prices could keep rising", "beef cost warning issued");
+  }
+
+  if (brand === "WENDY'S" && product?.key === "sweet-sour-sauce" && /\breturn|back\b/.test(text)) {
+    const detail = /\buproar|outrage|complain|backlash\b/.test(text) ? "after customer uproar" : condition;
+    return formatHeadlineFromFacts(brand, "sweet & sour sauce returns", detail);
+  }
+
+  if (brand === "KRISPY KREME" && /\b(minis?\s+for\s+mom|16\s*count|16-count)\b/.test(text)) {
+    const datePhrase = extractDatePhrase(condition);
+    const detail = datePhrase ? `available ${datePhrase}` : condition;
+    return formatHeadlineFromFacts(brand, "16-count Minis for Mom box", detail);
+  }
+
+  if (brand === "SHAKE SHACK" && product?.key === "shackburger" && /\bnurses?\b/.test(text)) {
+    const datePhrase = extractDatePhrase(condition);
+    const detail = datePhrase ? `${datePhrase} with purchase` : "with purchase for nurses";
+    return formatHeadlineFromFacts(brand, "free ShackBurger for nurses", detail);
+  }
 
   if (isRecallOrAlert && product) {
     const brandLine = product.key === "frozen-pizzas" && /\baldi\b/.test(text) && /\bwalmart\b/.test(text)
@@ -767,10 +843,19 @@ function genericEditorialHeadline(candidate) {
     return formatHeadlineFromFacts(brandLine, `${productLine} ${action}`, detectRiskDetail(text));
   }
 
+  if (brand === "RAISING CANE'S" && product?.key === "box-combo" && /\b(free|bogo|buy\s+one|get\s+one)\b/i.test(text)) {
+    const datePhrase = extractDatePhrase(condition);
+    return formatHeadlineFromFacts(brand, "free box combo", `with purchase ${datePhrase}`.trim());
+  }
+
   if (/\bbogo\b|\bbuy\s+one\s+get\s+one\b/i.test(text) && product && condition) {
     const item = product.key === "scoops" ? "free scoop" : product.plural;
     const detail = brand === "WHITE CASTLE" && product.key === "combo-meals"
       ? condition.replace(/\s+in the app\b/i, "")
+      : brand === "SCOOTER'S COFFEE" && /after\s+\d{1,2}/i.test(condition)
+        ? condition.replace(/\s+in the app\b/i, "").replace(/\s+only\b/i, "")
+        : brand === "ARBY'S" && product.key === "sandwiches"
+          ? condition.replace(/\s+only\s+in\s+the\s+app\b/i, " in app")
       : condition;
     return formatHeadlineFromFacts(brand, `BOGO ${item}`, detail);
   }
@@ -783,6 +868,10 @@ function genericEditorialHeadline(candidate) {
         : product.plural;
     const detail = brand === "7 BREW" && product.key === "koozie" && /with 2 medium or large drinks/i.test(condition)
       ? "with 2 medium or large drinks"
+      : brand === "RAISING CANE'S" && product.key === "box-combo"
+        ? `with purchase ${extractDatePhrase(condition) || ""}`.trim()
+        : brand === "FAZOLI'S" && product.key === "pasta"
+          ? "with entrée purchase"
       : condition;
     return formatHeadlineFromFacts(brand, `free ${item}`, detail);
   }
@@ -790,6 +879,13 @@ function genericEditorialHeadline(candidate) {
   if (product?.key === "hot-dog-combo" && /\bwater\b|\bupdated?\b|\badded\b/i.test(text)) {
     const pricePrefix = price?.[0] ? `${price[0]} ` : "";
     return formatHeadlineFromFacts(brand, `${pricePrefix}${product.plural} updated`, "water now an option");
+  }
+
+  if (discount && condition) {
+    const detail = /\bcode\s+[a-z0-9]+\b/i.test(text)
+      ? condition.replace(/\s+only\s+with\s+code\b/i, " with code")
+      : condition;
+    return formatHeadlineFromFacts(brand, discount, detail);
   }
 
   if (price && product && condition) {
@@ -860,7 +956,7 @@ function hasUsefulThirdLine(line) {
   if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
     return false;
   }
-  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|starting|starts?|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|after|before|purchase|code|customers?|cheap|uproar|backlash|warning|issued|costs?|under|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
 }
 
 function isWeakHeadline(headline) {
@@ -1003,12 +1099,21 @@ function storyTopicFingerprint(candidate) {
     [/\badult\s+bed\s+rails?\b|\bbed\s+rails?\b|\bvive\s+health\b/, "bed-rails"],
     [/\bthermos\b|\bstainless\s+king\b|\bfood\s+jars?\b|\bbottles?\b/, "food-jars"],
     [/\bhot\s+dog\s+combo\b/, "hot-dog-combo"],
+    [/\bmcdouble\b/, "mcdouble"],
+    [/\bvalue\s+menu\b|\bitems?\s+under\s+\$?3\b/, "value-menu"],
+    [/\bbeef\s+costs?\b|\bprices?\b.{0,60}\brising\b/, "beef-costs"],
+    [/\bsweet\s*&?\s*sour\s+sauce\b/, "sweet-sour-sauce"],
+    [/\bbox\s+combo\b/, "box-combo"],
     [/\bcombo\s+meals?\b|\bwhite\s+castle\b.{0,80}\bbogo\b|\bbogo\b.{0,80}\bwhite\s+castle\b/, "combo-meals"],
+    [/\bshackburger\b/, "shackburger"],
     [/\btacos?\b/, "tacos"],
     [/\bburgers?\b/, "burgers"],
     [/\bscoops?\b|\bice\s+cream\b/, "ice-cream"],
     [/\bkoozie\b|\bbrewsie\b/, "koozie"],
     [/\bminis?\b|\bdoughnuts?\b|\bdonuts?\b/, "doughnuts"],
+    [/\bsandwich(?:es)?\b/, "sandwiches"],
+    [/\bpasta\b/, "pasta"],
+    [/\b24\s*oz\b.{0,40}\biced\s+drink\b|\biced\s+drink\b.{0,40}\b24\s*oz\b/, "iced-drink"],
     [/\bpoppi\b|\bdrinks?\b|\brefreshers?\b|\bsodas?\b/, "drinks"],
     [/\bwraps?\b/, "wraps"],
     [/\bcooking\s+classes?\b|\bskills\s+series\b/, "cooking-classes"],
