@@ -1,4 +1,4 @@
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 async function callGemini(systemPrompt, userContent, apiKey, { maxTokens = 1024, temperature = 0 } = {}) {
   const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {

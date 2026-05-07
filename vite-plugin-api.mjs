@@ -3,6 +3,7 @@ import { join } from "path";
 import { fetchStories, writeHeadline } from "./pipeline/lib/storyPipeline.mjs";
 import { searchImagesForBrand } from "./pipeline/lib/imageSearch.mjs";
 import { gemini } from "./pipeline/lib/gemini.mjs";
+import { writeOpenAIHeadline } from "./pipeline/lib/openaiResearch.mjs";
 
 // Vite doesn't push .env into process.env for plugins — load it manually
 function loadDotEnv() {
@@ -51,11 +52,12 @@ export function apiPlugin() {
           const headline = url.searchParams.get("headline") || "";
           const title    = url.searchParams.get("title") || "";
           const summary  = url.searchParams.get("summary") || "";
+          const imageQuery = url.searchParams.get("imageQuery") || "";
           if (!brand) { res.setHeader("Content-Type", "application/json"); res.end("[]"); return; }
           try {
-            let aiQuery = null;
+            let aiQuery = imageQuery.trim() || null;
             const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
-            if ((keys.geminiKey || keys.groqKey) && headline) {
+            if (!aiQuery && (keys.geminiKey || keys.groqKey) && headline) {
               aiQuery = await gemini(
                 "Write a 5-8 word Google Images query for a real exterior/streetfront photograph of the physical business in this story. Prefer storefront, restaurant exterior, drive-thru, entrance, or building sign photos. Do not search for logos, menus, products, coupons, screenshots, or generic brand images. Return only the query.",
                 `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,
@@ -73,17 +75,23 @@ export function apiPlugin() {
         }
 
         if (url.pathname === "/api/headline") {
-          const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
-          if (!keys.geminiKey && !keys.groqKey) { res.statusCode = 503; res.end(JSON.stringify({ error: "No AI API key configured" })); return; }
+          const keys = { openaiKey: process.env.OPENAI_API_KEY, geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
+          if (!keys.openaiKey && !keys.geminiKey && !keys.groqKey) { res.statusCode = 503; res.end(JSON.stringify({ error: "No AI API key configured" })); return; }
           try {
             const chunks = [];
             for await (const chunk of req) chunks.push(chunk);
             const body = JSON.parse(Buffer.concat(chunks).toString());
             const { brand, title, summary } = body;
             if (!title) { res.statusCode = 400; res.end(JSON.stringify({ error: "title required" })); return; }
-            const headline = await writeHeadline({ brand: brand || "RETAIL", title, rawSummary: summary || title }, keys);
+            const candidate = { brand: brand || "RETAIL", title, rawSummary: summary || title };
+            const result = keys.openaiKey
+              ? await writeOpenAIHeadline(candidate, process.env).catch((e) => {
+                if (!keys.geminiKey && !keys.groqKey) throw e;
+                return writeHeadline(candidate, keys);
+              })
+              : await writeHeadline(candidate, keys);
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ headline }));
+            res.end(JSON.stringify(result));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));

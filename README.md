@@ -64,6 +64,12 @@ npm run pipeline:run
 Copy `.env.example` into your local environment and set the values you want to use.
 
 - `ANTHROPIC_API_KEY`: enables model-based ranking and writing
+- `OPENAI_API_KEY`: preferred provider for the app story feed; enables Responses API web search, source checking, and finished headline cards
+- `OPENAI_RESEARCH_MODEL`: model used for the OpenAI research pass, default `gpt-5.5`
+- `OPENAI_HEADLINE_MODEL`: model used when regenerating a headline, default `gpt-5.4-mini`
+- `OPENAI_STORY_COUNT`: target number of verified story cards to return, default `12`
+- `OPENAI_REASONING_EFFORT`: reasoning effort for the OpenAI research pass, default `medium`
+- `STORY_PROVIDER`: set to `legacy` to skip OpenAI and use the older Gemini/Groq search pipeline
 - `RESEND_API_KEY`: enables real email delivery
 - `RECIPIENT_EMAIL`: where the daily batch should go
 - `SENDER_EMAIL`: verified sender for Resend

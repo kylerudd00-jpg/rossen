@@ -7,12 +7,13 @@ export default async function handler(req, res) {
   const headline = params.get("headline") || "";
   const title    = params.get("title") || "";
   const summary  = params.get("summary") || "";
+  const imageQuery = params.get("imageQuery") || "";
   if (!brand) return res.status(200).json([]);
 
   try {
     const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
-    let query = null;
-    if ((keys.geminiKey || keys.groqKey) && headline) {
+    let query = imageQuery.trim() || null;
+    if (!query && (keys.geminiKey || keys.groqKey) && headline) {
       query = await gemini(
         "Write a 5-8 word Google Images query for a real exterior/streetfront photograph of the physical business in this story. Prefer storefront, restaurant exterior, drive-thru, entrance, or building sign photos. Do not search for logos, menus, products, coupons, screenshots, or generic brand images. Return only the query.",
         `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,

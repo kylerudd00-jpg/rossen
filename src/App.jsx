@@ -1,6 +1,40 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
+const SEARCH_SOURCES = [
+  "Brave Search", "Tavily", "Google News", "Hip2Save", "Slickdeals",
+  "Eater", "Clark Howard", "Brand Eating", "Chew Boom", "DealNews",
+  "The Penny Hoarder", "People Food", "Good Housekeeping", "Fast Food Post",
+  "RetailMeNot", "Krazy Coupon Lady", "Today Food", "Delish",
+  "Brave Search", "Tavily", "Google News", "Slickdeals", "Hip2Save",
+  "Brand Eating", "Chew Boom", "Eater", "Clark Howard", "DealNews",
+];
+
+function SourceTicker() {
+  const [idx, setIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const cycle = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIdx((i) => (i + 1) % SEARCH_SOURCES.length);
+        setVisible(true);
+      }, 120);
+    }, 420);
+    return () => clearInterval(cycle);
+  }, []);
+
+  return (
+    <div className="source-ticker">
+      <span className="ticker-arrow">→</span>
+      <span className={`ticker-name ${visible ? "ticker-name--in" : "ticker-name--out"}`}>
+        {SEARCH_SOURCES[idx]}
+      </span>
+    </div>
+  );
+}
+
 function formatTimeAgo(date) {
   const mins = Math.floor((Date.now() - date.getTime()) / 60000);
   if (mins < 1) return "just now";
@@ -78,21 +112,27 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
   const lineH     = Math.round(fontSize * 1.13);
   const bottomPad = Math.round(height * 0.048);
   const totalTextH = lines.length * lineH;
-  const textTop    = height - bottomPad - totalTextH;
 
-  // Divider + logo — build layout bottom-up so nothing overlaps
+  // ── Logo sizing ──────────────────────────────────────────────────────────────
   const logoImg = logoResult.status === "fulfilled" ? logoResult.value : null;
   const LOGO_H  = Math.round(width * 0.13);
   const LOGO_W  = logoImg
     ? Math.round(LOGO_H * (logoImg.naturalWidth / logoImg.naturalHeight))
     : Math.round(LOGO_H * 1.43);
 
-  // Logo sits just above the text with a small breathing gap
-  const belowLogoGap = Math.round(width * 0.022);
-  const logoY   = textTop - belowLogoGap - LOGO_H;
+  // ── Spacing algorithm (bottom-up) ───────────────────────────────────────────
+  // Gap between Rossen logo bottom and first text line.
+  // Tied to logo height so it scales correctly at any resolution.
+  const LOGO_TEXT_GAP = Math.round(LOGO_H * 0.17);
+
+  // 1. Text block anchors to bottom
+  const textTop = height - bottomPad - totalTextH;
+  // 2. Logo sits directly above text
+  const logoY   = textTop - LOGO_TEXT_GAP - LOGO_H;
   const logoX   = (width - LOGO_W) / 2;
-  const dividerY = Math.round(logoY + LOGO_H * 0.5); // line through center of logo
-  const lineGap = Math.round(width * 0.026);
+  // 3. Divider line runs through the vertical center of the logo
+  const dividerY = Math.round(logoY + LOGO_H * 0.5);
+  const lineGap  = Math.round(width * 0.026); // gap between logo edge and divider line ends
 
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.70)";
@@ -237,14 +277,15 @@ function PostCard({ post }) {
 
 function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [thumbnail, setThumbnail] = useState(null);
   const [regenerating, setRegenerating] = useState(false);
+  const [headlineOptions, setHeadlineOptions] = useState(null);
 
   async function handleRegenerate(e) {
     e.preventDefault();
     e.stopPropagation();
     if (regenerating) return;
     setRegenerating(true);
+    setHeadlineOptions(null);
     try {
       const r = await fetch("/api/headline", {
         method: "POST",
@@ -253,50 +294,34 @@ function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
       });
       if (r.ok) {
         const data = await r.json();
-        if (data.headline?.includes("\n")) onUpdateHeadline(data.headline);
+        if (data.options?.length > 0) {
+          setHeadlineOptions(data.options);
+          onUpdateHeadline(data.options[0]);
+        } else if (data.headline?.includes("\n")) {
+          onUpdateHeadline(data.headline);
+        }
       }
     } finally {
       setRegenerating(false);
     }
   }
 
-  useEffect(() => {
-    // Use search generator so "MCDONALD'S" finds "McDonald's", etc.
-    const params = new URLSearchParams({
-      action: "query",
-      generator: "search",
-      gsrsearch: story.brand,
-      gsrlimit: "1",
-      prop: "pageimages",
-      pithumbsize: "200",
-      format: "json",
-      origin: "*",
-    });
-    fetch(`https://en.wikipedia.org/w/api.php?${params}`)
-      .then(r => r.json())
-      .then(data => {
-        const src = Object.values(data.query?.pages || {})[0]?.thumbnail?.source;
-        if (src) setThumbnail(src);
-      })
-      .catch(() => {});
-  }, [story.brand]);
+  const headlineLines = (story.headline || "").split("\n").filter(Boolean);
 
   return (
     <div className={`story-card-wrap ${selected ? "story-card-wrap--selected" : ""} ${disabled ? "story-card-wrap--disabled" : ""}`}>
       <label className="story-card-main">
         <input className="visually-hidden" type="checkbox" checked={selected} onChange={onToggle} disabled={disabled} />
-        {thumbnail ? (
-          <div className="story-thumb">
-            <img src={thumbnail} alt="" draggable="false" />
-          </div>
-        ) : (
-          <div className="story-thumb story-thumb--placeholder">
-            {story.brand.charAt(0)}
-          </div>
-        )}
         <div className="story-card-body">
-          <div className="story-brand">{story.brand}</div>
-          <div className="story-title" title={story.title}>{story.title}</div>
+          {headlineLines.length > 0 ? (
+            <div className="story-headline-display">
+              {headlineLines.map((line, i) => (
+                <span key={i} className={`story-headline-line${i === 0 ? " story-headline-brand" : ""}`}>{line}</span>
+              ))}
+            </div>
+          ) : (
+            <div className="story-title" title={story.title}>{story.title}</div>
+          )}
           <div className="story-meta">
             <span>{story.sourceDomain}</span>
             <span className="meta-sep">·</span>
@@ -308,16 +333,31 @@ function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
         </div>
       </label>
 
-      {story.headline && (
-        <div className="headline-preview-row">
-          <div className="headline-preview-lines">
-            {story.headline.split("\n").filter(Boolean).map((line, i) => (
-              <span key={i} className={i === 0 ? "hl-preview-brand" : "hl-preview-line"}>{line}</span>
-            ))}
-          </div>
-          <button className="btn-regenerate" onClick={handleRegenerate} disabled={regenerating} title="Regenerate headline">
-            {regenerating ? <span className="regen-spinner" /> : "↻"}
-          </button>
+      <div className="story-card-footer">
+        <div className="story-source-title" title={story.title}>{story.title}</div>
+        <button className="btn-regenerate" onClick={handleRegenerate} disabled={regenerating}>
+          {regenerating ? <span className="regen-spinner" /> : <><span className="regen-icon">↻</span> Regenerate</>}
+        </button>
+      </div>
+
+      {headlineOptions && headlineOptions.length > 1 && (
+        <div className="headline-options">
+          <div className="headline-options-label">Pick a headline:</div>
+          {headlineOptions.map((opt, i) => {
+            const lines = opt.split("\n").filter(Boolean);
+            const active = opt === story.headline;
+            return (
+              <button
+                key={i}
+                className={`headline-option-btn ${active ? "headline-option-btn--active" : ""}`}
+                onClick={(e) => { e.stopPropagation(); onUpdateHeadline(opt); }}
+              >
+                {lines.map((line, j) => (
+                  <span key={j} className={j === 0 ? "ho-brand" : j === 1 ? "ho-line2" : "ho-line3"}>{line}</span>
+                ))}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -412,8 +452,8 @@ export default function App() {
   function toggleStory(id) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) { next.delete(id); }
-      else if (next.size < 5) { next.add(id); }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -452,6 +492,7 @@ export default function App() {
           headline,
           title: story.title || "",
           summary: story.rawSummary || "",
+          imageQuery: story.imageQuery || "",
         });
         const res = await fetch(`/api/images?${params}`);
         if (res.ok) candidates = await res.json();
@@ -476,6 +517,13 @@ export default function App() {
     setStories(prev => prev.map(s => s.id === id ? { ...s, headline } : s));
   }
 
+  function goHome() {
+    setError(null);
+    setPosts([]);
+    setPhase(stories.length > 0 ? "selecting" : "idle");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   useEffect(() => { fetchStories({ force: true }); }, []);
 
   return (
@@ -484,7 +532,15 @@ export default function App() {
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-left">
-          <img src="/rossen-reports.png" alt="Rossen Reports" className="header-logo" />
+          <button
+            type="button"
+            className="header-logo-button"
+            onClick={goHome}
+            disabled={phase === "loading" || phase === "generating"}
+            aria-label="Go to home"
+          >
+            <img src="/rossen-reports.png" alt="Rossen Reports" className="header-logo" />
+          </button>
         </div>
         <div className="header-right">
           {lastFetched && (
@@ -499,7 +555,7 @@ export default function App() {
               onClick={() => fetchStories({ force: true })}
               disabled={phase === "loading" || phase === "generating"}
             >
-              <span className="btn-text-full">↺ Fetch Stories</span>
+              <span className="btn-text-full">↺ Find New Stories</span>
               <span className="btn-text-short">↺ Refresh</span>
             </button>
           )}
@@ -526,7 +582,9 @@ export default function App() {
         {phase === "loading" && (
           <div className="phase-center" aria-live="polite" aria-atomic="true">
             <div className="loading-ring" />
-            <p className="loading-title">{fetchProgress.message || "Starting…"}</p>
+            <p className="loading-title">Scanning for today's best deals</p>
+            <SourceTicker />
+            <p className="loading-status">{fetchProgress.message || "Starting…"}</p>
             <div
               className="fetch-progress-track"
               role="progressbar"
@@ -540,7 +598,6 @@ export default function App() {
                 style={{ width: `${fetchProgress.percent}%` }}
               />
             </div>
-            <p className="loading-sub">{fetchProgress.percent}%</p>
           </div>
         )}
 
@@ -551,12 +608,11 @@ export default function App() {
               <div className="selecting-bar-left">
                 <div className="selection-pill">
                   <span className="selection-pill-count">{selected.size}</span>
-                  <span className="selection-pill-label">/ 5 selected</span>
+                  <span className="selection-pill-label">{selected.size === 1 ? "story" : "stories"} selected</span>
                 </div>
                 <span className="selecting-hint">
-                  {selected.size === 0 && "Check up to 5 stories to turn into posts"}
-                  {selected.size > 0 && selected.size < 5 && `${5 - selected.size} more`}
-                  {selected.size === 5 && "Good to go"}
+                  {selected.size === 0 && "Select any stories to turn into posts"}
+                  {selected.size > 0 && `${selected.size} post${selected.size > 1 ? "s" : ""} will be generated`}
                 </span>
               </div>
               <div className="selecting-bar-right">
@@ -588,7 +644,7 @@ export default function App() {
                       story={story}
                       selected={selected.has(story.id)}
                       onToggle={() => toggleStory(story.id)}
-                      disabled={!selected.has(story.id) && selected.size >= 5}
+                      disabled={false}
                       onUpdateHeadline={(h) => updateStoryHeadline(story.id, h)}
                     />
                   ))}

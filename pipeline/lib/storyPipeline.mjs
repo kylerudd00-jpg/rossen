@@ -1,18 +1,13 @@
-import { parseRssItems } from "./rss.mjs";
 import { summarizeText } from "./text.mjs";
-import { discoveryQueries } from "../config/discoveryQueries.mjs";
 import { gemini } from "./gemini.mjs";
 import { scoreCandidate } from "./scoring.mjs";
+import { agentSearch } from "./agentSearch.mjs";
+import { researchStoriesWithOpenAI } from "./openaiResearch.mjs";
+import { researchStoriesWithGemini } from "./geminiResearch.mjs";
 
 function envNumber(env, key, fallback) {
   const value = Number(env?.[key]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function chunkArray(items, size) {
-  const chunks = [];
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
-  return chunks;
 }
 
 // ─── Brand detection ──────────────────────────────────────────────────────────
@@ -180,7 +175,7 @@ function toCandidate(item, sourceId, label, index) {
     sourceDomain: domain,
     publishedAt: displayDate,
     rawPubDate,
-    rawSummary: summarizeText(item.rawSummary || item.title, 280),
+    rawSummary: summarizeText(item.rawSummary || item.title, 500),
     brand: inferBrand(combined),
     queryLabel: label,
   };
@@ -192,44 +187,6 @@ function isRecent(rawPubDate, maxDays = 8) {
   const d = new Date(rawPubDate);
   if (isNaN(d.getTime())) return true; // unparseable = let through
   return (Date.now() - d.getTime()) < maxDays * 24 * 60 * 60 * 1000;
-}
-
-// ─── Fetchers ─────────────────────────────────────────────────────────────────
-
-async function fetchRss(url, timeoutMs = 8000) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.text();
-}
-
-async function fetchFeed(id, url, label, limit = 10) {
-  try {
-    const xml = await fetchRss(url);
-    return parseRssItems(xml).slice(0, limit).map((item, i) => toCandidate(item, id, label, i));
-  } catch (e) {
-    console.warn(`[pipeline] ${label} failed:`, e.message);
-    return [];
-  }
-}
-
-async function fetchGoogleNews({ maxPerQuery = 10, concurrency = 8 } = {}) {
-  const allItems = [];
-  for (const batch of chunkArray(discoveryQueries, concurrency)) {
-    const results = await Promise.allSettled(
-      batch.map(async (query) => {
-        const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query.query)}&hl=en-US&gl=US&ceid=US:en`;
-        try {
-          const xml = await fetchRss(url);
-          return parseRssItems(xml).slice(0, maxPerQuery).map((item, i) => toCandidate(item, query.id, query.label, i));
-        } catch (e) {
-          console.warn(`[pipeline] Google News "${query.label}" failed:`, e.message);
-          return [];
-        }
-      })
-    );
-    results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
-  }
-  return allItems;
 }
 
 // ─── Pre-filter (hard kills only — AI handles relevance judgment) ─────────────
@@ -245,6 +202,16 @@ const HARD_SKIP = [
   /\bhow to (save|shop|get|find|use)\b/i,
   /\btips? (for|to|on)\b|\bbest ways? to\b|\bguide to\b/i,
   /\bbudget(ing)?\s+(tips?|advice|guide|hack)\b/i,
+  // Roundup/listicle articles — no single brand has a concrete specific deal.
+  // These can never produce a good headline because the content is too vague.
+  /\b\d+\s+(restaurants?|places?|stores?|brands?|chains?|ways?|things?|deals?|items?)\b.{0,40}\b(deals?|free|discounts?|offers?|savings?)\b/i,
+  /\bdeals?\s+(include|and\s+freebies?|at\s+various|across\s+)/i,
+  /\bfreebies?\s+(and\s+deals?|available|this\s+week|for\s+\w+\s+week)/i,
+  /\b(appreciation|awareness)\s+week\b.{0,60}\b(deals?|free|discounts?|offers?|freebies?)\b/i,
+  /\bwhere\s+to\s+(find|get|score|grab)\b/i,
+  /\b(best|top|biggest)\s+(deals?|sales?|discounts?|savings?)\s+(of|for|this|in)\b/i,
+  /\beverything\s+(you need to know|on sale|that's|thats)\b/i,
+  /\b(complete|ultimate|full)\s+(guide|list|roundup)\b/i,
 ];
 
 function titleFingerprint(title) {
@@ -310,238 +277,173 @@ function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
     .slice(0, limit);
 }
 
-// ─── Brave news search ────────────────────────────────────────────────────────
-
-function braveQueries() {
-  const now = new Date();
-  const month = now.toLocaleString("en-US", { month: "long" });
-  const year = now.getFullYear();
-  const my = `${month} ${year}`;
-  return [
-    // New menu items & returning favorites
-    `restaurant "new menu" OR "new item" OR "launches" OR "debuts" ${my}`,
-    `"coming back" OR "returns to menu" OR "back permanently" restaurant ${my}`,
-    `fast food "limited edition" OR "themed menu" OR "collab" ${my}`,
-    // Free food & deals
-    `free food restaurant deal promotion ${my}`,
-    `"free" food "named" OR "nurses" OR "teachers" OR "military" restaurant ${my}`,
-    `"national" day free food restaurant deal ${my}`,
-    `"free taco" OR "free burger" OR "free pizza" OR "free sandwich" ${my}`,
-    `BOGO OR "buy one get one" restaurant fast food ${my}`,
-    `"$1" OR "$2" OR "$3" meal deal restaurant fast food ${my}`,
-    // Brand-specific
-    `McDonald's new deal promotion launch ${my}`,
-    `Starbucks deal BOGO free promotion ${my}`,
-    `Costco deal new item price change ${my}`,
-    `Chipotle Popeyes "Burger King" "Shake Shack" deal promotion ${my}`,
-    `"Red Lobster" OR "Olive Garden" OR "Applebee's" deal promo ${my}`,
-    // Recalls & safety
-    `FDA CPSC recall consumer food product safety ${my}`,
-    `food recall contamination salmonella allergy warning ${my}`,
-    // Store & service news
-    `"store closing" OR bankruptcy OR "going out of business" retail ${year}`,
-    `"price increase" OR "membership fee" OR "now free" major brand ${my}`,
-    `"new partnership" OR "now delivers" OR "available on" brand store ${my}`,
-    // Seasonal
-    `"Mother's Day" free food deal restaurant ${year}`,
-    `"nurses week" OR "teacher appreciation" free deal restaurant ${year}`,
-  ];
-}
-
-async function fetchBraveNews(apiKey, { count = 8 } = {}) {
-  const queries = braveQueries();
-  // Run in batches of 10 to avoid rate limits
-  const allItems = [];
-  for (let i = 0; i < queries.length; i += 10) {
-    const batch = queries.slice(i, i + 10);
-    const results = await Promise.allSettled(
-      batch.map(async (q) => {
-        const url = `https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(q)}&count=${count}&freshness=pw`;
-        const res = await fetch(url, {
-          headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": apiKey },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return (data.results || []).map((item, i) => toCandidate(
-          {
-            title: item.title,
-            sourceUrl: item.url,
-            // Brave "age" can be "3 hours ago" (unparseable) or an ISO string.
-            // If it can't be parsed as a date, substitute today — freshness=pw
-            // already guarantees results are ≤7 days old.
-            publishedAt: (() => {
-              if (!item.age) return null;
-              const d = new Date(item.age);
-              return isNaN(d.getTime()) ? new Date().toISOString() : item.age;
-            })(),
-            rawSummary: item.description || item.title,
-          },
-          `brave-${q.slice(0, 20)}`,
-          `Brave: ${q}`,
-          i,
-        ));
-      })
-    );
-    results.forEach((r) => { if (r.status === "fulfilled") allItems.push(...r.value); });
-  }
-  return allItems;
-}
 
 // ─── All sources ──────────────────────────────────────────────────────────────
 
-async function fetchAllSources(env = {}) {
+async function fetchAllSources(env = {}, progress) {
   const braveKey = env.BRAVE_API_KEY;
-  const googleNewsPerQuery = envNumber(env, "GOOGLE_NEWS_PER_QUERY", envNumber(env, "MAX_CANDIDATES_PER_QUERY", 10));
-  const googleNewsConcurrency = envNumber(env, "GOOGLE_NEWS_CONCURRENCY", 24);
-  const braveNewsCount = envNumber(env, "BRAVE_NEWS_COUNT", 8);
-  const results = await Promise.allSettled([
-    fetchGoogleNews({ maxPerQuery: googleNewsPerQuery, concurrency: googleNewsConcurrency }),
-    braveKey ? fetchBraveNews(braveKey, { count: braveNewsCount }) : Promise.resolve([]),
-    // ── High-quality consumer news outlets ────────────────────────────────────
-    fetchFeed("people-food",   "https://people.com/food/feed/",                               "People Food",         15),
-    fetchFeed("people-shop",   "https://people.com/shopping/feed/",                           "People Shopping",     10),
-    fetchFeed("today-food",    "https://feeds.today.com/rss/food",                            "Today Food",          10),
-    fetchFeed("delish",        "https://www.delish.com/rss/all.xml",                          "Delish",              10),
-    fetchFeed("eater",         "https://www.eater.com/rss/index.xml",                         "Eater",               10),
-    fetchFeed("good-house",    "https://www.goodhousekeeping.com/food-news/rss/",             "Good Housekeeping",    8),
-    // ── Restaurant & fast food news ───────────────────────────────────────────
-    fetchFeed("brand-eating",  "https://www.brandeating.com/feeds/posts/default",             "Brand Eating",        15),
-    fetchFeed("chew-boom",     "https://www.chewboom.com/feed/",                              "Chew Boom",           15),
-    fetchFeed("fast-food-post","https://www.fastfoodpost.com/feed/",                          "Fast Food Post",      12),
-    // ── Consumer deals & advocacy ─────────────────────────────────────────────
-    fetchFeed("clark-howard",  "https://clark.com/feed/",                                     "Clark Howard",        10),
-    fetchFeed("penny-hoarder", "https://www.thepennyhoarder.com/feed/",                       "The Penny Hoarder",   10),
-    fetchFeed("hip2save",      "https://hip2save.com/feed/",                                  "Hip2Save",            12),
-    fetchFeed("slickdeals",    "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1", "Slickdeals", 12),
-    fetchFeed("dealnews",      "https://dealnews.com/featured/rss.xml",                       "DealNews",            10),
-    fetchFeed("retailmenot",   "https://www.retailmenot.com/blog/feed",                       "RetailMeNot Blog",     8),
-    fetchFeed("krazy-coupon",  "https://thekrazycouponlady.com/feed",                         "Krazy Coupon Lady",   10),
-  ]);
-  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  const tavilyKey = env.TAVILY_API_KEY;
+  const geminiKey = env.GEMINI_API_KEY;
+  const groqKey = env.GROQ_API_KEY;
+  const maxRounds = envNumber(env, "AGENT_MAX_ROUNDS", 20);
+
+  const result = await agentSearch({ braveKey, tavilyKey, geminiKey, groqKey, progress, maxRounds });
+  const candidates = result.map((item, i) => toCandidate(item, "agent", "Agent Search", i));
+  console.log(`[pipeline] Agent found ${candidates.length} articles`);
+  return candidates;
 }
 
 // ─── Combined filter + headline (single AI call) ─────────────────────────────
 
-const COMBINED_PROMPT = `You are a consumer news researcher and copywriter for a Facebook/Instagram page targeting viewers age 50+ (many age 75+).
+// Step 1 of 2: AI just picks stories — no headline writing here.
+// Separating filter from headline writing gives each step full model attention.
+const FILTER_PROMPT = `You are a consumer news editor for a Facebook/Instagram page targeting Americans age 50–75+.
 
-You receive a JSON array of recent news articles. In ONE pass: pick the best ones AND write the Instagram headline for each.
+From the articles below, select stories worth posting. A good story lets a reader say:
+- "I can get something free from a brand I know"
+- "I need to check something I own right now"
+- "A company did something shady that affects me"
+- "A brand I use is changing in a way I need to know"
+- "There's a scam targeting people like me"
 
-PICK IT if it's one of these:
-1. Big brand deals: free food, BOGO, $1 deals, free items, rewards/app deals, teacher/nurse/military/senior appreciation, holiday promos
-2. Consumer alerts: food or product recalls — burn, choking, poisoning, contamination, injury, fire, vision loss
-3. Brand news people care about: new menu items, returning favorites, price changes, store closings, membership changes, policy changes
-4. Consumer controversy: hidden fees, surveillance pricing, misleading labels, data breaches, class action lawsuits
-5. Free events: free admission, free store classes, free workshops
+PICK: specific deals, recalls, safety alerts, lawsuits, brand changes, data breaches, senior-targeted scams
 
-PRIORITIZE: Costco, Walmart, Target, Amazon, McDonald's, Starbucks, Chipotle, Chick-fil-A, Taco Bell, Burger King, Subway, Wendy's, Domino's, Pizza Hut, Popeyes, Shake Shack, Red Lobster, Applebee's, Olive Garden, Dairy Queen, Dunkin', Krispy Kreme, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Disney+, Netflix
+HARD SKIP — do not select these even if they mention brand names:
+- Corporate earnings, stock prices, investor news
+- Layoffs, executive changes, employment news
+- "Prices may rise" articles with no specific product or brand action
+- How-to guides, listicles, general shopping tips
+- Expired deals
+- Roundup/listicle articles (e.g. "10 restaurants with teacher deals", "Best Memorial Day sales", "Nurses week freebies at various chains") — SKIP these entirely unless the article is specifically about ONE brand's ONE concrete deal with a stated price, product name, or exact date
 
-SKIP IT if: expired deal, vague/no brand, coupon code, how-to listicle, B2B industry news, hyperlocal
+TO PASS THE TEST, a selected article must have at least ONE of:
+  ✓ A specific dollar amount or free item named
+  ✓ A specific product name (not just "items" or "products")
+  ✓ A specific date or deadline
+  ✓ A specific legal claim or safety finding
 
-HEADLINE FORMAT for each picked story — 3 plain-English phrases, one per JSON field:
-- "brand": the brand name in ALL CAPS (e.g. "CHIPOTLE"). Multi-retailer recall/sale: "AMAZON / WALMART / TARGET"
-- "offer": 3–7 words, the core deal/news hook. Specific product/price/action. No punctuation. Lowercase.
-- "detail": 2–6 words, the key condition/date/location. No punctuation. Lowercase. Empty string "" if nothing concrete.
+PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Panera, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
-RULES:
-- Use exact prices, products, and dates from the article — never invent
-- Never repeat the brand name in offer or detail
-- For recalls: name the exact product and danger plainly ("possible salmonella risk" not "health concerns")
-- For lawsuits: "lawsuit claims" / "accused of" — never state allegations as fact
-- For deals with no specific end date: use "" for detail rather than guessing
+For each selected article, identify the ONE specific brand with the most concrete deal. Return that brand name.
 
-EXAMPLES:
-"McDonald's launches Stranger Things Happy Meal on May 5th"
-→ {"id":"...","brand":"MCDONALD'S","offer":"stranger things happy meal","detail":"launches may 5th"}
+Return ONLY a JSON array of up to 15 selected stories. [] if nothing qualifies. No other text.
+[{"id":"...","brand":"BRAND NAME ALL CAPS"}, ...]`;
 
-"Chipotle testing $2.50 tacos through June 2nd at select Tampa/Orlando/KC locations"
-→ {"id":"...","brand":"CHIPOTLE","offer":"2.50 tacos","detail":"through june 2nd select locations"}
+// ─── Fact extraction (replaces "write a headline" approach) ──────────────────
+// Instead of asking AI to write a headline (where it takes shortcuts),
+// we ask it to answer specific questions. The structure of the questions
+// makes it impossible to copy the article title — you can't put
+// "teacher appreciation week deals include freebies" into the "what" field
+// when that field is defined as "the exact item, product, or danger".
 
-"Red Lobster brings back Endless Shrimp after bankruptcy"
-→ {"id":"...","brand":"RED LOBSTER","offer":"endless shrimp is back","detail":"for a limited time"}
+const EXTRACT_PROMPT = `Extract structured facts from this consumer news article to fill a poster headline template.
 
-"Firehouse Subs giving free subs to anyone named Mike on May 6th only"
-→ {"id":"...","brand":"FIREHOUSE SUBS","offer":"free subs for people named mike","detail":"may 6th only"}
+Answer ONLY from facts in the article. Do not invent. Do not summarize. Do not write prose.
 
-"Shake Shack free burger weekly in May with any $10+ purchase"
-→ {"id":"...","brand":"SHAKE SHACK","offer":"free burgers every week","detail":"with 10 dollar plus purchase all may"}
+Fill this template. Each option is a different angle on the same story:
+{
+  "brand": "company name in ALL CAPS",
+  "options": [
+    { "action": "...", "what": "...", "condition": "..." },
+    { "action": "...", "what": "...", "condition": "..." },
+    { "action": "...", "what": "...", "condition": "..." }
+  ]
+}
 
-"Thermos recalling 8.2 million jars after vision loss injuries"
-→ {"id":"...","brand":"THERMOS","offer":"8.2 million jars recalled","detail":"vision loss injuries reported"}
+━━━ FIELD RULES ━━━
 
-"Costco updating $1.50 hot dog combo — water now an option"
-→ {"id":"...","brand":"COSTCO","offer":"1.50 hot dog combo updated","detail":"water now an option"}
+brand — The ONE specific company. Not a category. If many brands appear, pick the one with the most concrete specific detail.
 
-Return ONLY a JSON array of the stories you picked (max 12). Empty array [] if nothing qualifies. No other text.
-[{"id":"...","brand":"...","offer":"...","detail":"..."}, ...]`;
+action — The event type. Choose the most accurate from this list ONLY:
+  FREE · RECALLED · SUED · WARNING · PRICE CHANGE · DATA BREACH · SCAM · NEW · RETURNING · UPDATED · SETTLEMENT · ACCUSED · BOGO · ENDS
+  — OR — a dollar amount like "$2.50" or "50% OFF" if that IS the main hook
 
-// ─── Headline formatter (used by pipeline + /api/headline endpoint) ───────────
+what — The SPECIFIC THING. This must be a real noun:
+  ✓ "drink for teachers" · "gourmia pressure cookers" · "$2.50 tacos" · "low acid coffee label" · "hot dog combo" · "hot cocoa mix"
+  ✗ "deal" · "offer" · "items" · "products" · "freebies" · "savings" · "update" · "news"
+  — what fills in the sentence: "[action] [what]" must make sense as a consumer alert
 
-const EXTRACT_PROMPT = `You write on-image headline text for a consumer news Facebook/Instagram page targeting viewers age 50+ (many 75+).
+condition — The single most useful detail: exact date, who qualifies, where, what risk.
+  ✓ "may 5–9 with school id" · "stop using — burn hazard" · "through june 2nd at select locations" · "lawsuit claims label misled buyers"
+  — Be specific with timing: "may 6th only" not "this week", "through may 31st" not "limited time"
+  — For allegations, use safe legal language: "lawsuit claims" · "cpsc says" · "fda says" · "customers report" · "accused of"
+  — Use null if truly nothing concrete exists.
 
-Given an article, extract two plain-English phrases that will become lines 2 and 3 of a 3-line ALL CAPS graphic headline. Line 1 is always the brand name (handled separately).
+━━━ EXAMPLES ━━━
 
-- "brand": line 1 — the brand name(s) in ALL CAPS. If one brand, just that name (e.g. "CHIPOTLE"). If a product is sold or recalled at multiple major retailers, list up to 3 separated by " / " (e.g. "AMAZON / WALMART / TARGET"). Use the shortest recognizable form.
-- "offer": line 2 — the core deal, alert, or news hook in 3–7 words. No punctuation, no caps. Be specific — use the exact product name, price, or action. Never vague.
-- "detail": line 3 — the key condition, date, location, or context in 2–6 words. No punctuation, no caps. Use exact dates when available. Empty string if nothing meaningful to add.
+Article: "Starbucks giving teachers a free handcrafted drink May 5-9 with valid school ID"
+→ {
+  "brand": "STARBUCKS",
+  "options": [
+    { "action": "FREE", "what": "drink for teachers", "condition": "may 5–9 with valid school id" },
+    { "action": "FREE", "what": "handcrafted beverage for educators", "condition": "show school id at checkout, through may 9" },
+    { "action": "FREE", "what": "any drink for teachers", "condition": "participating stores, may 5–9 only" }
+  ]
+}
 
-LINE BREAK RULES (critical):
-- Each line must be a complete chunk of meaning
-- Never split a number from what it describes ("$2.50 tacos" stays together)
-- Never cut a phrase mid-thought
+Article: "CPSC warns stop using Gourmia pressure cookers sold at Best Buy after burn injuries"
+→ {
+  "brand": "BEST BUY",
+  "options": [
+    { "action": "RECALLED", "what": "gourmia pressure cookers", "condition": "stop using — cpsc says burn hazard" },
+    { "action": "WARNING", "what": "gourmia pressure cooker burn risk", "condition": "cpsc says stop using immediately" },
+    { "action": "RECALLED", "what": "gourmia air fryer pressure cooker", "condition": "burn injuries reported — check your home" }
+  ]
+}
 
-STYLE RULES:
-- Be blunt and specific. Name the exact product/price/danger
-- For recalls: name the exact product and danger in plain language (e.g. "possible salmonella risk" not "health concerns"); include where sold if relevant
-- For lawsuits: use "lawsuit claims" / "accused of" / "state claims" / "customers report" — NEVER state allegations as proven
-- For safety: reference the authority when relevant (e.g. "cpsc says stop using" / "fda warning issued")
-- For deals: include exact dates, purchase requirement, app/rewards/ID requirement, "select locations" when applicable
-- Avoid: "prices are rising" / "stores are changing" / "consumers are upset" / "limited time" unless no better date exists
-- NEVER repeat the brand name in offer or detail — it is already on line 1
-- NEVER invent facts, dates, or conditions not in the article
-- If there is no meaningful detail (no date, location, or condition), return an empty string for detail — do NOT pad with "available now" or "at participating locations" unless the article says so
+Article: "Chipotle testing $2.50 tacos at select locations through June 2nd"
+→ {
+  "brand": "CHIPOTLE",
+  "options": [
+    { "action": "$2.50", "what": "tacos at select locations", "condition": "through june 2nd only" },
+    { "action": "NEW", "what": "$2.50 taco deal", "condition": "select locations, ends june 2nd" },
+    { "action": "$2.50", "what": "tacos being tested nationwide", "condition": "select locations through june 2nd" }
+  ]
+}
 
-BAD vs GOOD EXAMPLES:
+Article: "Costco updating food court: bottled water now an option with $1.50 hot dog combo"
+→ {
+  "brand": "COSTCO",
+  "options": [
+    { "action": "UPDATED", "what": "$1.50 hot dog combo", "condition": "bottled water now an option" },
+    { "action": "NEW", "what": "water option added to $1.50 hot dog", "condition": "food court update" },
+    { "action": "UPDATED", "what": "famous $1.50 hot dog combo", "condition": "now comes with water option" }
+  ]
+}
 
-Bad: {"offer": "chocolate products recall", "detail": "allergy risk"}
-Good: {"offer": "hot cocoa mixes recalled", "detail": "possible salmonella risk"}
+Article: "Thermos recalling 8.2 million vacuum jars after vision loss injuries"
+→ {
+  "brand": "THERMOS",
+  "options": [
+    { "action": "RECALLED", "what": "8.2 million vacuum jars", "condition": "vision loss injuries reported" },
+    { "action": "WARNING", "what": "thermos vacuum jar recall", "condition": "stop using — vision loss risk" },
+    { "action": "RECALLED", "what": "8.2 million thermos jars", "condition": "check your home — injury reports filed" }
+  ]
+}
 
-Bad: {"offer": "ticket prices changing", "detail": "travelers may pay more"}
-Good: {"offer": "sued for surveillance pricing", "detail": "fares may change based on your data"}
+Article: "Multiple restaurants running teacher appreciation week deals and freebies this week"
+→ null
 
-Bad: {"offer": "2.50", "detail": "tacos through june 2nd"}
-Good: {"offer": "2.50 tacos", "detail": "through june 2nd at select locations"}
+━━━ RETURN null IF ━━━
+- No single brand has a concrete specific action (no price, no specific product, no specific date, no specific legal claim)
+- The article is a roundup covering many brands with no one brand having a specific deal
 
-EXAMPLES (showing offer → detail pairs):
+Return ONLY the JSON object or null. No other text.`;
 
-Article: "Shake Shack is giving away a free burger every week in May with any $10+ purchase"
-→ {"offer": "free burgers every week", "detail": "with 10 dollar plus purchase all may"}
+// ─── Offer validator ──────────────────────────────────────────────────────────
+// Catches AI-generated garbage like "teacher appreciation week deals include freebies"
+// before it reaches the rendered card. Invalid offers are re-run through EXTRACT_PROMPT.
 
-Article: "Chipotle is testing $2.50 tacos through June 2nd at select locations"
-→ {"offer": "2.50 tacos", "detail": "through june 2nd at select locations"}
+const VALID_OFFER_START = /^(free\s|recalled|sued\b|warning\b|is\s+\w|was\s+\w|new\s+\w|returning\b|data\s+breach|scam\b|accused\b|settlement\b|giving\b|get\s+free|buy\s+one|bogo\b|ends\s|\$\d|\d+[\.,]?\d*\s*(million|thousand|billion)|[½¼⅓])/i;
 
-Article: "CPSC warns consumers to immediately stop using Gourmia pressure cookers sold at Best Buy after burn injuries"
-→ {"offer": "pressure cookers warning", "detail": "cpsc says stop using immediately"}
+const BANNED_OFFER = /\b(consumer\s*alert|deal\s*alert|available\s+now|limited\s+time|coming\s+soon|this\s+week|deals?\s+include|deals?\s+at\b|freebies?\b|various\b|several\b|multiple\b|new\s+update\b|new\s+warning\b|new\s+announcement\b)\b/i;
 
-Article: "Thermos is recalling 8.2 million jars after reports of vision loss injuries"
-→ {"offer": "8.2 million jars recalled", "detail": "vision loss injuries reported"}
-
-Article: "Trader Joe's is being sued over its low acid coffee label, with the lawsuit claiming it misled buyers"
-→ {"offer": "sued over low acid coffee", "detail": "lawsuit claims label misled buyers"}
-
-Article: "Bank of America cardholders get free admission to 150+ museums May 2nd–3rd"
-→ {"offer": "free admission to 150 plus museums", "detail": "may 2nd and 3rd for cardholders"}
-
-Article: "Firehouse Subs is giving free subs to anyone named Mike on May 6th only"
-→ {"offer": "free subs for people named mike", "detail": "may 6th only"}
-
-Article: "Costco is updating the $1.50 hot dog combo — water is now an option instead of soda"
-→ {"offer": "1.50 hot dog combo updated", "detail": "water now an option"}
-
-Article: "Instacart is ending AI pricing tests after a Consumer Reports investigation"
-→ {"offer": "ends ai pricing tests", "detail": "after consumer reports investigation"}
-
-Only use facts from the article. Return ONLY valid JSON, no other text: {"brand":"...","offer":"...","detail":"..."}`;
+function isValidOffer(offer) {
+  if (!offer || offer.trim().length < 8) return false;
+  if (BANNED_OFFER.test(offer)) return false;
+  if (!VALID_OFFER_START.test(offer.trim())) return false;
+  return true;
+}
 
 function formatHeadlineFromFacts(brand, offer, detail) {
   const up = (s) => s.toUpperCase().trim();
@@ -575,44 +477,70 @@ function fallbackHeadlineForCandidate(candidate) {
     .replace(/\s+/g, " ")
     .trim();
 
-  const price = title.match(/\$\s?\d+(?:\.\d{2})?/);
-  const date = title.match(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/i);
+  const brandName = candidate.brand || "RETAIL";
 
-  let offer = "consumer alert";
+  // Strip the brand from the title to get the core offer text
+  const brandEscaped = brandName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const strippedTitle = title
+    .replace(new RegExp(brandEscaped, "gi"), "")
+    .replace(/^[\s\-–—:,]+|[\s\-–—:,]+$/g, "")
+    .trim();
+
+  const date = title.match(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/i);
+  const price = title.match(/\$\s?\d+(?:\.\d{2})?/);
+
+  let offer = "";
   let detail = "";
 
-  if (/\brecall(?:ed|s)?\b|\bcpsc\b|\bfda\b|\bwarning\b/.test(text)) {
-    offer = "recall alert";
-    detail = /\bsalmonella|listeria|allergy|contamination|burn|injury|fire\b/.test(text)
-      ? "check your home"
-      : "new warning issued";
+  if (/\brecall(?:ed|s)?\b|\bcpsc\b|\bfda\b|\busda\b/.test(text)) {
+    // Extract what's being recalled from the title
+    const recallMatch = strippedTitle.match(/(.+?)\s+(?:recall|warning)/i);
+    offer = recallMatch ? `${recallMatch[1]} recalled` : `${strippedTitle.slice(0, 50)} recalled`;
+    if (/\bsalmonella\b/.test(text)) detail = "possible salmonella risk";
+    else if (/\blisteria\b/.test(text)) detail = "possible listeria risk";
+    else if (/\bfire|burn\b/.test(text)) detail = "fire or burn hazard";
+    else if (/\binjur|death|fatal\b/.test(text)) detail = "injury risk reported";
+    else if (/\ballerg\b/.test(text)) detail = "undeclared allergen";
+    else if (/\bcontaminat\b/.test(text)) detail = "contamination concern";
+    else detail = "check product at home";
+  } else if (/\bwarning\b/.test(text)) {
+    offer = strippedTitle.slice(0, 55) || "new warning";
+    detail = date ? date[0] : "";
+  } else if (/\bsued|lawsuit|class\s+action|ftc|investigation\b/.test(text)) {
+    const suedMatch = strippedTitle.match(/(.+?)\s+(?:sued|lawsuit|investigation)/i);
+    offer = suedMatch ? `sued over ${suedMatch[1]}` : strippedTitle.slice(0, 55);
+    detail = date ? date[0] : "lawsuit claims";
+  } else if (/\bdata\s+breach|hacked|leaked\b/.test(text)) {
+    offer = strippedTitle.slice(0, 55) || "data breach reported";
+    detail = date ? date[0] : "customer data exposed";
   } else if (/\bbogo\b|buy one get one/.test(text)) {
-    offer = "bogo deal";
-    detail = date ? date[0] : "limited time";
+    offer = `buy one get one ${strippedTitle.match(/free|half/i)?.[0] || "free"}`;
+    detail = date ? date[0] : "";
   } else if (/\bfree\b/.test(text)) {
-    const freePhrase = title.match(/\bfree\s+[a-z0-9$.'-]+(?:\s+[a-z0-9$.'-]+){0,4}/i);
-    offer = freePhrase ? freePhrase[0] : "free deal";
-    detail = date ? date[0] : "limited time";
-    if (date && offer.toLowerCase().includes(date[0].toLowerCase())) {
-      offer = offer.replace(new RegExp(date[0], "i"), "").replace(/\s+/g, " ").trim();
-    }
+    const freePhrase = title.match(/\bfree\s+[a-z0-9$.'"'-]+(?:\s+[a-z0-9$.'"'-]+){0,5}/i);
+    offer = freePhrase ? freePhrase[0].slice(0, 55) : strippedTitle.slice(0, 55);
+    detail = date ? date[0] : "";
   } else if (price) {
-    offer = `${price[0].replace(/\s+/g, "")} deal`;
-    detail = date ? date[0] : "available now";
-  } else if (/\bclosing|bankruptcy|shutting down\b/.test(text)) {
-    offer = "stores closing";
-    detail = "new list released";
-  } else if (/\bnew\b|\blaunch|\breturns?\b|\bback\b/.test(text)) {
-    offer = /\bmenu\b|restaurant|burger|taco|pizza|coffee|sandwich/.test(text)
-      ? "new menu update"
-      : "new update";
-    detail = date ? date[0] : "available now";
-  } else if (/\bdeal|discount|save|sale|offer|promo/.test(text)) {
-    offer = "deal alert";
-    detail = date ? date[0] : "available now";
+    // Put price right up front
+    const afterPrice = strippedTitle.replace(price[0], "").trim().slice(0, 40);
+    offer = afterPrice ? `${price[0]} ${afterPrice}` : strippedTitle.slice(0, 55);
+    detail = date ? date[0] : "";
+  } else if (/\bclosing|bankrupt|shut\s+down\b/.test(text)) {
+    offer = strippedTitle.slice(0, 55) || "stores closing";
+    detail = date ? date[0] : "";
+  } else if (/\breturning|returns?\s+to\s+menu|back\s+on\s+menu|favorite\b/.test(text)) {
+    offer = strippedTitle.slice(0, 55) || "menu item returning";
+    detail = date ? date[0] : "";
+  } else if (/\bnew\b|\blaunch\b/.test(text)) {
+    offer = strippedTitle.slice(0, 55) || "new update";
+    detail = date ? date[0] : "";
+  } else {
+    // Last resort: use the stripped title directly, no generic fallback phrases
+    offer = strippedTitle.slice(0, 55) || title.slice(0, 55);
+    detail = date ? date[0] : (price ? price[0] : "");
   }
 
-  return formatHeadlineFromFacts(candidate.brand, offer, detail);
+  return formatHeadlineFromFacts(brandName, offer || strippedTitle.slice(0, 55) || title.slice(0, 50), detail);
 }
 
 function fallbackStoriesWithHeadlines(candidates, limit = 12) {
@@ -644,48 +572,145 @@ function aiUnavailableMessage(error) {
     : "AI is unavailable — using fallback headlines…";
 }
 
-export async function writeHeadline(candidate, keys) {
+// useFallback: true for the /api/headline endpoint (user explicitly asked to regenerate)
+//              false for the pipeline (skip bad stories rather than show garbage)
+export async function writeHeadline(candidate, keys, { useFallback = true } = {}) {
   const article = `Title: ${candidate.title}\nSummary: ${candidate.rawSummary}`;
   let text;
   try {
-    text = await gemini(EXTRACT_PROMPT, article, keys, { maxTokens: 300 });
+    text = await gemini(EXTRACT_PROMPT, article, keys, { maxTokens: 1000 });
   } catch (e) {
     console.warn(`[pipeline] Headline AI unavailable for "${candidate.title}":`, e.message);
-    return fallbackHeadlineForCandidate(candidate);
+    if (!useFallback) return null;
+    const fallback = fallbackHeadlineForCandidate(candidate);
+    return { headline: fallback, options: [fallback] };
   }
-  const match = text.match(/\{[\s\S]*?\}/);
-  if (!match) throw new Error("No JSON in headline response");
-  const { brand, offer, detail } = JSON.parse(match[0]);
-  if (!offer) throw new Error("Empty offer in headline response");
-  const headline = formatHeadlineFromFacts(brand || candidate.brand, offer, detail || "");
-  if (!headline.includes("\n")) throw new Error("Headline collapsed to single line");
-  return headline;
+  // AI returns null when article has no concrete specific facts
+  if (/^\s*null\s*$/.test(text.trim())) {
+    if (!useFallback) return null;
+    const fallback = fallbackHeadlineForCandidate(candidate);
+    return { headline: fallback, options: [fallback] };
+  }
+  // New format: {"brand":"...","options":[{"action":"...","what":"...","condition":"..."}]}
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) {
+    if (!useFallback) return null;
+    const fallback = fallbackHeadlineForCandidate(candidate);
+    return { headline: fallback, options: [fallback] };
+  }
+  let parsed;
+  try { parsed = JSON.parse(match[0]); } catch {
+    if (!useFallback) return null;
+    const fallback = fallbackHeadlineForCandidate(candidate);
+    return { headline: fallback, options: [fallback] };
+  }
+  const brand = (parsed.brand || candidate.brand || "").toUpperCase().trim();
+  const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
+  const options = rawOptions
+    .map(({ action, what, condition }) => {
+      if (!action || !what) return null;
+      const line2 = `${action} ${what}`.toUpperCase().trim();
+      const line3 = condition ? condition.toUpperCase().trim() : "";
+      return [brand, line2, line3].filter(Boolean).join("\n");
+    })
+    .filter((h) => h && h.includes("\n") && !BANNED_OFFER.test(h));
+  if (options.length === 0) {
+    if (!useFallback) return null;
+    const fallback = fallbackHeadlineForCandidate(candidate);
+    return { headline: fallback, options: [fallback] };
+  }
+  return { headline: options[0], options };
+}
+
+async function runFilterPass(candidates, keys) {
+  const payload = candidates.map((c) => ({
+    id: c.id,
+    brand: c.brand,
+    title: c.title,
+    summary: (c.rawSummary || "").slice(0, 200),
+  }));
+
+  // Groq: batch into groups of 20 (smaller payload, short summaries) to avoid 413
+  const hasGemini = !!keys.geminiKey;
+  let picks = [];
+
+  if (hasGemini) {
+    const text = await gemini(FILTER_PROMPT, JSON.stringify(payload), keys, { maxTokens: 600 });
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      try { picks = JSON.parse(match[0]); } catch {}
+    }
+  } else {
+    const BATCH = 20;
+    for (let i = 0; i < payload.length; i += BATCH) {
+      const batchPayload = payload.slice(i, i + BATCH).map((c) => ({
+        id: c.id, brand: c.brand, title: c.title, summary: c.summary.slice(0, 80),
+      }));
+      const text = await gemini(FILTER_PROMPT, JSON.stringify(batchPayload), keys, { maxTokens: 400 });
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          const batch = JSON.parse(match[0]);
+          if (Array.isArray(batch)) picks.push(...batch);
+        } catch {}
+      }
+      if (picks.length >= 15) break;
+    }
+  }
+
+  return Array.isArray(picks) ? picks.slice(0, 15) : [];
+}
+
+// Run up to `concurrency` promises at a time (avoids hammering Gemini rate limit)
+async function pooled(items, concurrency, fn) {
+  const results = [];
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = await Promise.all(items.slice(i, i + concurrency).map(fn));
+    results.push(...batch);
+    if (i + concurrency < items.length) await new Promise((r) => setTimeout(r, 1500));
+  }
+  return results;
 }
 
 async function filterAndRewriteWithAI(candidates, keys, progress) {
-  progress("Reading today's stories…", 40);
-  const payload = candidates.map((c) => ({ id: c.id, brand: c.brand, title: c.title, summary: c.rawSummary }));
-  const text = await gemini(COMBINED_PROMPT, JSON.stringify(payload), keys, { maxTokens: 3000 });
-  progress("Formatting headlines…", 80);
+  // Step 1: filter — AI picks which stories are worth posting
+  progress("Selecting best stories…", 40);
+  const picks = await runFilterPass(candidates, keys);
 
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("No JSON array in AI response");
-  const picked = JSON.parse(match[0]);
-  if (!Array.isArray(picked)) throw new Error("AI response was not an array");
+  if (picks.length === 0) throw new Error("AI filter returned no stories");
 
-  const withHeadlines = [];
-  for (const item of picked) {
-    const candidate = candidates.find((c) => c.id === item.id);
-    if (!candidate || !item.offer) continue;
+  // Step 2: write — each story gets its own focused headline call
+  progress("Writing headlines…", 60);
+  const toWrite = picks
+    .map(({ id, brand }) => {
+      const candidate = candidates.find((c) => c.id === id);
+      if (!candidate) return null;
+      // Use the brand the AI identified (may be more specific for multi-brand articles)
+      return brand && brand !== "RETAIL" ? { ...candidate, brand } : candidate;
+    })
+    .filter((c) => {
+      if (!c) return false;
+      // Skip articles with no real summary — AI has nothing to extract facts from
+      const summary = (c.rawSummary || "").trim();
+      const hasRealSummary = summary.length >= 30 && summary.toLowerCase() !== c.title.toLowerCase().slice(0, summary.length);
+      if (!hasRealSummary) console.warn(`[pipeline] Skipping "${c.title}" — no usable summary`);
+      return hasRealSummary;
+    });
+
+  const results = await pooled(toWrite, 3, async (candidate) => {
     try {
-      const headline = formatHeadlineFromFacts(item.brand || candidate.brand, item.offer, item.detail || "");
-      if (!headline.includes("\n")) continue;
-      withHeadlines.push({ ...candidate, headline });
+      // useFallback:false — if AI can't write a good headline, skip the story entirely
+      // rather than show a garbage title-copy headline on the card
+      const result = await writeHeadline(candidate, keys, { useFallback: false });
+      if (result?.headline?.includes("\n")) return { ...candidate, headline: result.headline };
     } catch (e) {
-      console.warn(`[pipeline] Headline format failed for "${candidate.title}":`, e.message);
+      console.warn(`[pipeline] Headline failed for "${candidate.title}":`, e.message);
     }
-  }
-  console.log(`[pipeline] AI picked ${withHeadlines.length} / ${candidates.length} candidates`);
+    return null;
+  });
+
+  const withHeadlines = results.filter(Boolean);
+  console.log(`[pipeline] Filtered to ${picks.length}, wrote ${withHeadlines.length} headlines`);
   return withHeadlines;
 }
 
@@ -696,6 +721,7 @@ let _cacheAt = 0;
 const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
 const FALLBACK_CACHE_TTL = 15 * 60 * 1000; // retry AI soon after rate limits clear
 let _cacheTtl = CACHE_TTL;
+let _inFlight = null; // prevents concurrent pipeline runs from burning API quota
 
 export async function fetchStories(progress = () => {}, { force = false } = {}) {
   if (!force && _cache && Date.now() - _cacheAt < _cacheTtl) {
@@ -703,8 +729,57 @@ export async function fetchStories(progress = () => {}, { force = false } = {}) 
     return _cache;
   }
 
-  progress(`Running mega search across ${discoveryQueries.length} Google News queries…`, 5);
-  const all = await fetchAllSources(process.env);
+  // If a pipeline run is already in progress, wait for it instead of starting another
+  if (_inFlight) {
+    console.log("[pipeline] Waiting for in-flight pipeline run...");
+    return _inFlight;
+  }
+
+  _inFlight = _runPipeline(progress, { force }).finally(() => { _inFlight = null; });
+  return _inFlight;
+}
+
+async function _runPipeline(progress = () => {}, { force = false } = {}) {
+  // Re-check cache in case it was populated while we were waiting for the lock
+  if (!force && _cache && Date.now() - _cacheAt < _cacheTtl) {
+    progress("Loading today's stories…", 100);
+    return _cache;
+  }
+
+  if (process.env.OPENAI_API_KEY && process.env.STORY_PROVIDER !== "legacy") {
+    try {
+      const results = await researchStoriesWithOpenAI(process.env, progress);
+      progress(`Done — ${results.length} verified stories ready`, 100);
+      console.log(`[pipeline] OpenAI returned ${results.length} verified stories`);
+      _cache = results;
+      _cacheAt = Date.now();
+      _cacheTtl = CACHE_TTL;
+      return results;
+    } catch (e) {
+      console.warn(`[pipeline] OpenAI research failed, trying backup pipeline: ${e.message}`);
+      if (process.env.STORY_PROVIDER === "openai") throw e;
+      progress("OpenAI research had an issue. Trying backup search...", 20);
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY && process.env.STORY_PROVIDER !== "legacy") {
+    try {
+      const results = await researchStoriesWithGemini(process.env, progress);
+      progress(`Done — ${results.length} verified stories ready`, 100);
+      console.log(`[pipeline] Gemini returned ${results.length} verified stories`);
+      _cache = results;
+      _cacheAt = Date.now();
+      _cacheTtl = CACHE_TTL;
+      return results;
+    } catch (e) {
+      console.warn(`[pipeline] Gemini research failed, trying backup pipeline: ${e.message}`);
+      if (process.env.STORY_PROVIDER === "gemini") throw e;
+      progress("Gemini research had an issue. Trying backup search...", 20);
+    }
+  }
+
+  progress("Agent searching for stories…", 5);
+  const all = await fetchAllSources(process.env, progress);
   progress(`Scanning ${all.length} articles — picking the best ones…`, 30);
   const candidates = preFilter(all, {
     limit: envNumber(process.env, "PREFILTER_LIMIT", 120),
