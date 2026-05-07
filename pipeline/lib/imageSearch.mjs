@@ -1,31 +1,51 @@
 // Shared image search logic used by both api/images.js (Vercel) and vite-plugin-api.mjs (dev)
 
 const RESTAURANT_BRANDS = new Set([
-  "APPLEBEE'S", "BASKIN-ROBBINS", "BUFFALO WILD WINGS", "BURGER KING",
+  "7 BREW", "APPLEBEE'S", "ARBY'S", "AROMA JOE'S", "BASKIN-ROBBINS", "BUFFALO WILD WINGS", "BURGER KING",
   "CHICK-FIL-A", "CHIPOTLE", "COLD STONE", "COOK OUT", "CRACKER BARREL",
-  "DAIRY QUEEN", "DENNY'S", "DOMINO'S", "DUNKIN'", "FIVE GUYS",
+  "DAIRY QUEEN", "DENNY'S", "DOMINO'S", "DUNKIN'", "FAZOLI'S", "FIVE GUYS",
   "FIREHOUSE SUBS", "IHOP", "IN-N-OUT", "JAMBA", "JERSEY MIKE'S",
-  "KONA ICE", "LITTLE CAESARS", "MCDONALD'S", "PANDA EXPRESS",
+  "KONA ICE", "KRISPY KREME", "LITTLE CAESARS", "MCDONALD'S", "PANDA EXPRESS",
   "PANERA", "PAPA JOHN'S", "PIZZA HUT", "POPEYES", "POTBELLY",
   "QDOBA", "RAISING CANE'S", "RED LOBSTER", "SHAKE SHACK", "SONIC",
-  "STARBUCKS", "SUBWAY", "TACO BELL", "WENDY'S", "WHATABURGER",
+  "SCOOTER'S COFFEE", "STARBUCKS", "SUBWAY", "TACO BELL", "WENDY'S", "WHATABURGER",
+  "WHITE CASTLE",
   "WINGSTOP",
 ]);
 
 const PHARMACY_BRANDS = new Set(["CVS", "WALGREENS"]);
 const WAREHOUSE_BRANDS = new Set(["BJ'S WHOLESALE", "COSTCO", "SAM'S CLUB"]);
+const ENTERTAINMENT_BRANDS = new Set(["REGAL CINEMAS"]);
+const PRODUCT_FIRST_BRANDS = new Set([
+  "DIRTY CHIPS", "GOURMIA", "THERMOS", "UTZ", "VIVE HEALTH", "ZAPP'S",
+  "ZAPP'S / DIRTY CHIPS",
+]);
 
 const SEARCH_NAME_OVERRIDES = {
+  "7 BREW": "7 Brew",
+  "ALDI / WALMART": "Aldi Walmart",
+  "ARBY'S": "Arbys",
+  "AROMA JOE'S": "Aroma Joes",
   "BJ'S WHOLESALE": "BJs Wholesale",
   "CHICK-FIL-A": "Chick-fil-A",
   "DUNKIN'": "Dunkin",
+  "FAZOLI'S": "Fazolis",
+  "GOOD & GATHER": "Target Good and Gather",
   "IN-N-OUT": "In-N-Out",
   "JERSEY MIKE'S": "Jersey Mikes",
   "MCDONALD'S": "McDonalds",
   "PAPA JOHN'S": "Papa Johns",
   "RAISING CANE'S": "Raising Canes",
+  "REGAL CINEMAS": "Regal Cinemas",
   "SAM'S CLUB": "Sams Club",
+  "SCOOTER'S COFFEE": "Scooters Coffee",
+  "ZAPP'S / DIRTY CHIPS": "Zapps Dirty potato chips",
   "7-ELEVEN": "7-Eleven",
+};
+
+const RETAILER_IMAGE_TARGETS = {
+  "GOOD & GATHER": ["Target", "Good and Gather Target"],
+  "ALDI / WALMART": ["Aldi", "Walmart"],
 };
 
 const CURATED_EXTERIOR_IMAGES = {
@@ -116,10 +136,101 @@ function cleanQuery(query) {
     .trim();
 }
 
+function headlineLines(headline = "") {
+  return String(headline || "")
+    .split(/\n+/)
+    .map((line) => cleanQuery(line))
+    .filter(Boolean);
+}
+
+function stripHeadlineAction(value) {
+  return cleanQuery(value)
+    .replace(/\b(RECALLED|PUBLIC HEALTH ALERT|ALERT|WARNING|WARNINGS?|RETURNS?|RETURNING|UPDATED|UPDATE|LAUNCH(?:ES)?|BACKLASH|PUSH|DEAL)\b/gi, " ")
+    .replace(/\b(POSSIBLE|RISK|CONTAMINATION|CUSTOMERS?|SAYS?|ISN'?T|ISN’T|CHEAP|AFTER|WITH|FOR|ONLY|STARTING|AVAILABLE|THROUGH|IN APP|IN THE APP)\b/gi, " ")
+    .replace(/\b(FREE|BOGO)\b/gi, " ")
+    .replace(/\$\d+(?:\.\d{2})?\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractProductPhrase(options = {}) {
+  const lines = headlineLines(options.headline);
+  const line2 = lines[1] || "";
+  const cleanedLine = stripHeadlineAction(line2);
+  if (cleanedLine && cleanedLine.length >= 4) return cleanedLine;
+
+  const text = cleanQuery(`${options.title || ""} ${options.summary || ""}`);
+  const patterns = [
+    /\b(cr[eè]me\s+br[uû]l[eé]e)\b/i,
+    /\b(snack\s+mix(?:es)?)\b/i,
+    /\b(potato\s+chips?)\b/i,
+    /\b(frozen\s+pizzas?)\b/i,
+    /\b(pressure\s+cookers?)\b/i,
+    /\b(adult\s+bed\s+rails?)\b/i,
+    /\b(?:thermos\s+)?((?:stainless\s+king\s+)?(?:food|vacuum)\s+jars?)\b/i,
+    /\b(ShackBurger)\b/i,
+    /\b(16[-\s]?count\s+Minis\s+for\s+Mom\s+box)\b/i,
+    /\b(24\s*oz\s+iced\s+drink)\b/i,
+    /\b(sweet\s*&?\s*sour\s+sauce)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return cleanQuery(match[1]);
+  }
+  return "";
+}
+
+function isProductOrSafetyStory(brand, options = {}) {
+  const normalizedBrand = brand.toUpperCase();
+  const text = normalizeText([options.headline, options.title, options.summary].filter(Boolean).join(" "));
+  return PRODUCT_FIRST_BRANDS.has(normalizedBrand)
+    || /\b(recall|recalled|public\s+health\s+alert|warning|cpsc|fda|usda|salmonella|listeria|glass\s+contamination|injur|death)\b/.test(text);
+}
+
+function inferImageIntent(brand, options = {}) {
+  const normalizedBrand = brand.toUpperCase();
+  const text = normalizeText([brand, options.headline, options.title, options.summary].filter(Boolean).join(" "));
+
+  if (PRODUCT_FIRST_BRANDS.has(normalizedBrand)) return "product";
+  if (ENTERTAINMENT_BRANDS.has(normalizedBrand)) return "venue";
+  if (/\b(movie\s+tickets?|cinemas?|theater|theatre)\b/.test(text)) return "venue";
+  if (/\b(recall|recalled|public\s+health\s+alert|warning|cpsc|fda|usda|salmonella|listeria|glass\s+contamination)\b/.test(text)) {
+    return "hybrid";
+  }
+  return "venue";
+}
+
+function brandSearchTargets(brand, options = {}) {
+  const normalizedBrand = brand.toUpperCase();
+  const override = RETAILER_IMAGE_TARGETS[normalizedBrand];
+  const rawTargets = override
+    ? (Array.isArray(override) ? override : [override])
+    : String(brand || "")
+      .split(/\s+\/\s+|,\s*/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const productPhrase = extractProductPhrase(options);
+  const targets = rawTargets.length > 0 ? rawTargets : [brand];
+  const names = targets.map((target) => brandToSearchName(target));
+
+  if (normalizedBrand === "GOOD & GATHER") names.unshift("Good and Gather Target");
+  if (normalizedBrand === "ZAPP'S / DIRTY CHIPS") names.unshift("Zapp's Dirty potato chips");
+  if (normalizedBrand === "ALDI / WALMART" && productPhrase) names.unshift(`Aldi Walmart ${productPhrase}`);
+
+  return [...new Set(names.map(cleanQuery).filter(Boolean))];
+}
+
 function inferVenueDescriptor(brand, context = "") {
   const normalizedBrand = brand.toUpperCase();
   const text = normalizeText(`${brand} ${context}`);
 
+  if (ENTERTAINMENT_BRANDS.has(normalizedBrand) || /\b(movie\s+tickets?|cinemas?|theater|theatre)\b/.test(text)) {
+    return "movie theater exterior marquee";
+  }
+  if (/\b(coffee|brew|espresso|iced\s+drink|drive[-\s]?thru)\b/.test(text)) {
+    return "coffee shop drive thru exterior";
+  }
   if (RESTAURANT_BRANDS.has(normalizedBrand) || /\b(restaurant|fast food|menu|burger|pizza|taco|coffee|sandwich|drive[-\s]?thru)\b/.test(text)) {
     return "restaurant exterior storefront";
   }
@@ -133,47 +244,88 @@ function inferVenueDescriptor(brand, context = "") {
 }
 
 function buildExteriorQueries(brand, options = {}) {
-  const searchName = brandToSearchName(brand);
   const context = [options.headline, options.title, options.summary].filter(Boolean).join(" ");
   const descriptor = inferVenueDescriptor(brand, context);
+  const intent = inferImageIntent(brand, options);
+  const targets = brandSearchTargets(brand, options);
+  const productPhrase = extractProductPhrase(options);
+
   const queries = [
     options.aiQuery,
-    `${searchName} ${descriptor} photo`,
-    `${searchName} storefront exterior`,
-    `${searchName} building entrance sign`,
-  ]
-    .map(cleanQuery)
-    .filter(Boolean);
+  ];
 
-  return [...new Set(queries)].slice(0, options.maxQueries || 2);
+  if (productPhrase && intent !== "venue") {
+    for (const target of targets.slice(0, 2)) {
+      queries.push(`${target} ${productPhrase} package photo`);
+      queries.push(`${target} ${productPhrase} product photo`);
+    }
+    if (isProductOrSafetyStory(brand, options)) queries.push(`${productPhrase} recall product photo`);
+  }
+
+  if (intent !== "product") {
+    for (const target of targets.slice(0, 2)) {
+      queries.push(`${target} ${descriptor} photo`);
+      queries.push(`${target} storefront exterior`);
+      queries.push(`${target} building entrance sign`);
+    }
+  }
+
+  if (intent === "product" && !productPhrase) {
+    for (const target of targets.slice(0, 2)) queries.push(`${target} product package photo`);
+  }
+
+  return [...new Set(queries.map(cleanQuery).filter(Boolean))].slice(0, options.maxQueries || 4);
 }
 
 function buildFallbackQueries(brand, options = {}) {
-  const searchName = brandToSearchName(brand);
   const context = [options.headline, options.title, options.summary].filter(Boolean).join(" ");
   const descriptor = inferVenueDescriptor(brand, context);
+  const targets = brandSearchTargets(brand, options);
+  const searchName = targets[0] || brandToSearchName(brand);
+  const productPhrase = extractProductPhrase(options);
+  const intent = inferImageIntent(brand, options);
   const isRestaurant = descriptor.includes("restaurant");
+  const isTheater = descriptor.includes("theater");
   const isPharmacy = descriptor.includes("pharmacy");
   const isWarehouse = descriptor.includes("warehouse");
-  const venueWord = isRestaurant ? "restaurant" : isPharmacy ? "pharmacy" : isWarehouse ? "warehouse" : "store";
+  const venueWord = isTheater ? "theater" : isRestaurant ? "restaurant" : isPharmacy ? "pharmacy" : isWarehouse ? "warehouse" : "store";
 
-  return [
+  const queries = [
     `${searchName} ${venueWord}`,
     `${searchName} ${venueWord} exterior`,
     `${searchName} storefront`,
     `${searchName} building`,
     `${searchName} ${descriptor}`,
-  ].map(cleanQuery).filter(Boolean);
+  ];
+
+  if (productPhrase && intent !== "venue") {
+    queries.unshift(`${searchName} ${productPhrase} package`);
+    queries.unshift(`${searchName} ${productPhrase} product`);
+  }
+
+  return [...new Set(queries.map(cleanQuery).filter(Boolean))];
 }
 
 function curatedExteriorCandidates(brand) {
-  return (CURATED_EXTERIOR_IMAGES[brand.toUpperCase()] || []).map((url, index) => ({
-    url,
-    title: `${brandToSearchName(brand)} exterior`,
-    sourceDomain: "wikimedia.org",
-    source: "curated",
-    queryIndex: index,
-  }));
+  const normalizedBrand = brand.toUpperCase();
+  const targetNames = [
+    normalizedBrand,
+    ...(RETAILER_IMAGE_TARGETS[normalizedBrand] || []),
+  ].map((target) => String(target).toUpperCase());
+  const seen = new Set();
+  return targetNames.flatMap((targetName) =>
+    (CURATED_EXTERIOR_IMAGES[targetName] || []).map((url, index) => {
+      if (seen.has(url)) return null;
+      seen.add(url);
+      return {
+        url,
+        title: `${brandToSearchName(targetName)} exterior`,
+        sourceDomain: "wikimedia.org",
+        source: "curated",
+        queryIndex: index,
+      };
+    }).filter(Boolean)
+  );
 }
 
 function candidateKey(url) {
@@ -187,6 +339,83 @@ function candidateKey(url) {
   }
 }
 
+function toAbsoluteUrl(value, baseUrl) {
+  if (!value) return null;
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function isPublicHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    if (!["http:", "https:"].includes(parsed.protocol)) return false;
+    return !/^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|::1|0\.0\.0\.0)$/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function extractMetaContent(html, keyPattern) {
+  const re = /<meta\b[^>]*(?:property|name|itemprop)=["']?([^"'>\s]+)["']?[^>]*content=["']([^"']+)["'][^>]*>|<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name|itemprop)=["']?([^"'>\s]+)["']?[^>]*>/gi;
+  const matches = [];
+  let match;
+  while ((match = re.exec(html))) {
+    const key = match[1] || match[4] || "";
+    const content = match[2] || match[3] || "";
+    if (keyPattern.test(key) && content) matches.push(content.replace(/&amp;/g, "&"));
+  }
+  return matches;
+}
+
+function extractSourceImageUrls(html, sourceUrl) {
+  const urls = [
+    ...extractMetaContent(html, /^(og:image|og:image:url|twitter:image|twitter:image:src|image)$/i),
+  ];
+
+  const linkRe = /<link\b[^>]*rel=["'][^"']*image_src[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>/gi;
+  let linkMatch;
+  while ((linkMatch = linkRe.exec(html))) urls.push(linkMatch[1]);
+
+  const jsonImageRe = /"image"\s*:\s*(?:"([^"]+)"|\[\s*"([^"]+)")/gi;
+  let jsonMatch;
+  while ((jsonMatch = jsonImageRe.exec(html))) urls.push(jsonMatch[1] || jsonMatch[2]);
+
+  return [...new Set(urls
+    .map((url) => toAbsoluteUrl(url, sourceUrl))
+    .filter(Boolean)
+    .filter((url) => !/\.(svg|gif)(\?|$)/i.test(url))
+  )].slice(0, 6);
+}
+
+async function fetchSourceImageCandidates(sourceUrl, options = {}) {
+  if (!isPublicHttpUrl(sourceUrl)) return [];
+  const res = await fetch(sourceUrl, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; RossenReportsImageSearch/1.0)" },
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!res?.ok) return [];
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return [];
+  const html = (await res.text()).slice(0, 1_500_000);
+  const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || options.title || "source image";
+  let sourceDomain = "";
+  try { sourceDomain = new URL(sourceUrl).hostname.replace(/^www\./, ""); } catch {}
+
+  return extractSourceImageUrls(html, sourceUrl).map((url, index) => ({
+    url,
+    title,
+    snippet: options.summary,
+    contextUrl: sourceUrl,
+    sourceDomain,
+    source: "source-page",
+    query: sourceUrl,
+    queryIndex: index,
+  }));
+}
+
 function includesTerm(text, term) {
   const escapedWords = term
     .split(/\s+/)
@@ -194,11 +423,17 @@ function includesTerm(text, term) {
   return new RegExp(`(^|[^a-z0-9])${escapedWords.join("[\\s-]+")}([^a-z0-9]|$)`, "i").test(text);
 }
 
-function scoreCandidate(candidate, brand, queryIndex) {
+function scoreCandidate(candidate, brand, queryIndex, options = {}) {
   const titleCase = brandToTitleCase(brand).toLowerCase();
   const searchName = brandToSearchName(brand).toLowerCase();
-  const brandWords = [...new Set(`${titleCase} ${searchName}`.split(/\s+/))]
-    .filter((word) => word.length > 1);
+  const targets = brandSearchTargets(brand, options).join(" ").toLowerCase();
+  const productPhrase = extractProductPhrase(options).toLowerCase();
+  const weakWords = new Set(["and", "the", "for", "good", "store", "stores", "restaurant", "coffee"]);
+  const intent = inferImageIntent(brand, options);
+  const brandWords = [...new Set(`${titleCase} ${searchName} ${targets}`.split(/\s+/))]
+    .filter((word) => word.length > 1 && !weakWords.has(word));
+  const productWords = [...new Set(productPhrase.split(/\s+/))]
+    .filter((word) => word.length > 2 && !["for", "mom", "box"].includes(word));
   const text = normalizeText([
     candidate.url,
     candidate.title,
@@ -206,23 +441,55 @@ function scoreCandidate(candidate, brand, queryIndex) {
     candidate.contextUrl,
     candidate.sourceDomain,
   ].join(" "));
+  const imageText = normalizeText([
+    candidate.url,
+    candidate.sourceDomain,
+  ].join(" "));
 
-  let score = candidate.source === "google" ? 45
+  let score = candidate.source === "source-page" ? 52
+    : candidate.source === "google" ? 45
     : candidate.source === "brave" ? 42
     : candidate.source === "commons" ? 16
     : 10;
 
   score += Math.max(0, 8 - queryIndex * 3);
-  if (brandWords.some((word) => text.includes(word))) score += 10;
+  const hasBrandWord = brandWords.some((word) => text.includes(word));
+  const hasProductWord = productWords.some((word) => text.includes(word));
+  if (hasBrandWord) score += 14;
+  if (productWords.length > 0 && hasProductWord) score += 14;
 
-  for (const term of POSITIVE_TERMS) {
+  const positiveTerms = intent === "product"
+    ? ["package", "packaging", "product", "item", "recall", "recalled", "box", "bag", "jar", "chips", "snack", "mix", "pizza", "pressure cooker"]
+    : POSITIVE_TERMS;
+  const negativeTerms = intent === "product"
+    ? NEGATIVE_TERMS.filter((term) => !["packaging", "product"].includes(term))
+    : NEGATIVE_TERMS;
+
+  for (const term of positiveTerms) {
     if (includesTerm(text, term)) score += 8;
   }
-  for (const term of NEGATIVE_TERMS) {
+  for (const term of negativeTerms) {
     if (includesTerm(text, term)) score -= 14;
   }
+
+  if (intent === "hybrid") {
+    if (/\b(package|packaging|product|recall|recalled|storefront|exterior|building|sign)\b/i.test(text)) score += 6;
+  }
+
+  if (intent === "venue" && !hasBrandWord) score -= 14;
+  if (intent !== "venue" && productWords.length > 0 && !hasProductWord && !hasBrandWord) score -= 22;
+
   if (/\.(svg|gif)(\?|$)/i.test(candidate.url)) score -= 45;
-  if (/\b(logo|icon|coupon|menu|product|promo)\b/i.test(candidate.url)) score -= 28;
+  if (/\b(logo|icon|coupon|promo|transparent|vector|clipart)\b/i.test(candidate.url)) score -= 35;
+  if (intent === "venue" && /\b(menu|product|packaging)\b/i.test(candidate.url)) score -= 20;
+  if (/\b(seeklogo|worldvectorlogo|logowik|brandfetch|1000logos|pngimg|pngitem|cleanpng|favpng|stickpng|clipart|pinterest|facebook|instagram|tiktok|reddit)\b/i.test(text)) score -= 24;
+  if (/\b(ubereats|doordash|grubhub|postmates|seamless|menuwithprice|fastfoodmenuprices)\b/i.test(text)) score -= 18;
+  if (candidate.source === "source-page") {
+    const imageHasBrandOrProduct = [...brandWords, ...productWords].some((word) => imageText.includes(word));
+    if (/\b(social[-_]?graphic|share[-_]?image|default[-_]?image|placeholder|site[-_]?logo|logo|favicon|icon)\b/i.test(imageText) && !imageHasBrandOrProduct) {
+      score -= 90;
+    }
+  }
 
   return score;
 }
@@ -413,9 +680,10 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
     ? { aiQuery: optionsOrAiQuery }
     : (optionsOrAiQuery || {});
   const titleCase = brandToTitleCase(brand);
+  const intent = inferImageIntent(brand, options);
   const queries = buildExteriorQueries(brand, {
     ...options,
-    maxQueries: Number(env.IMAGE_QUERY_LIMIT) || 2,
+    maxQueries: Number(env.IMAGE_QUERY_LIMIT) || 4,
   });
 
   const webSearches = queries.flatMap((query, queryIndex) => [
@@ -423,10 +691,15 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
     braveKey           ? fetchBraveImageCandidates(query, braveKey, queryIndex)          : Promise.resolve([]),
   ]);
 
-  const webResults = await Promise.allSettled(webSearches);
-  const scored = webResults
-    .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
-    .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 0) }))
+  const [sourceResults, webResults] = await Promise.all([
+    fetchSourceImageCandidates(options.sourceUrl, options).catch(() => []),
+    Promise.allSettled(webSearches),
+  ]);
+  const scored = [
+    ...sourceResults,
+    ...webResults.flatMap((r) => (r.status === "fulfilled" ? r.value : [])),
+  ]
+    .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 0, options) }))
     .filter((candidate) => candidate.score >= 28)
     .sort((a, b) => b.score - a.score);
 
@@ -443,7 +716,7 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
   scored.forEach(addCandidate);
   const webCandidateCount = merged.length;
 
-  const curated = curatedExteriorCandidates(brand);
+  const curated = intent === "product" ? [] : curatedExteriorCandidates(brand);
   curated.forEach(addCandidate);
 
   if (curated.length > 0 && (webCandidateCount === 0 || merged.length >= 3)) {
@@ -457,7 +730,7 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
     ]);
     fallbackResults
       .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
-      .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 99) }))
+      .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 99, options) }))
       .filter((candidate) => candidate.score >= 16)
       .sort((a, b) => b.score - a.score)
       .forEach(addCandidate);

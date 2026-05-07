@@ -53,20 +53,21 @@ export function apiPlugin() {
           const title    = url.searchParams.get("title") || "";
           const summary  = url.searchParams.get("summary") || "";
           const imageQuery = url.searchParams.get("imageQuery") || "";
+          const sourceUrl = url.searchParams.get("sourceUrl") || "";
           if (!brand) { res.setHeader("Content-Type", "application/json"); res.end("[]"); return; }
           try {
             let aiQuery = imageQuery.trim() || null;
             const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
             if (!aiQuery && (keys.geminiKey || keys.groqKey) && headline) {
               aiQuery = await gemini(
-                "Write a 5-8 word Google Images query for a real exterior/streetfront photograph of the physical business in this story. Prefer storefront, restaurant exterior, drive-thru, entrance, or building sign photos. Do not search for logos, menus, products, coupons, screenshots, or generic brand images. Return only the query.",
+                "Write a 5-8 word Google Images query for the best real photograph for this consumer story. If it is a restaurant/store/theater deal, search for a real storefront, exterior, drive-thru, entrance, marquee, or building sign photo. If it is a recall/safety warning about a physical product, search for the exact product/package photo. Do not search for logos, menus, coupons, screenshots, social posts, or generic brand images. Return only the query.",
                 `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,
                 keys,
                 { maxTokens: 32 },
               ).catch(() => null);
             }
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(await searchImagesForBrand(brand, process.env, { aiQuery, headline, title, summary })));
+            res.end(JSON.stringify(await searchImagesForBrand(brand, process.env, { aiQuery, headline, title, summary, sourceUrl })));
           } catch (e) {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));

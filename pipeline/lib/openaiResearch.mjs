@@ -211,7 +211,7 @@ Schema:
       "summary": "one sentence with the exact verified fact",
       "why_it_matters": "short reason this is useful to the audience",
       "headline": ["BRAND", "EXACT ITEM / DEAL / WARNING / CHANGE", "DATE / RISK / CONDITION / WHY IT MATTERS"],
-      "image_query": "5-8 word query for a real storefront or exterior photo"
+      "image_query": "5-8 word image search query: storefront/exterior for places, exact product/package for recalls"
     }
   ]
 }`;

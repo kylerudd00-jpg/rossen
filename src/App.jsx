@@ -3,34 +3,54 @@ import "./App.css";
 
 const SEARCH_SOURCES = [
   "Brave Search", "Tavily", "Google News", "Hip2Save", "Slickdeals",
-  "Eater", "Clark Howard", "Brand Eating", "Chew Boom", "DealNews",
-  "The Penny Hoarder", "People Food", "Good Housekeeping", "Fast Food Post",
-  "RetailMeNot", "Krazy Coupon Lady", "Today Food", "Delish",
-  "Brave Search", "Tavily", "Google News", "Slickdeals", "Hip2Save",
-  "Brand Eating", "Chew Boom", "Eater", "Clark Howard", "DealNews",
+  "Clark Howard", "Brand Eating", "Chew Boom", "DealNews", "Eater",
+  "The Penny Hoarder", "Good Housekeeping", "Fast Food Post", "Delish",
+  "RetailMeNot", "Krazy Coupon Lady", "Today Food", "CPSC.gov",
+  "FDA.gov", "FTC.gov", "NBC News Consumer", "AP News", "Brad's Deals",
+  "ConsumerReports.org", "People Food", "NerdWallet", "USA Today",
 ];
 
-function SourceTicker() {
-  const [idx, setIdx] = useState(0);
-  const [visible, setVisible] = useState(true);
+function RadarPulse() {
+  return (
+    <div className="radar-wrap">
+      <div className="radar-ring radar-ring--1" />
+      <div className="radar-ring radar-ring--2" />
+      <div className="radar-ring radar-ring--3" />
+      <div className="radar-core" />
+    </div>
+  );
+}
+
+function SearchFeed() {
+  const counterRef = useRef(0);
+  const [rows, setRows] = useState([]);
 
   useEffect(() => {
-    const cycle = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => {
-        setIdx((i) => (i + 1) % SEARCH_SOURCES.length);
-        setVisible(true);
-      }, 120);
-    }, 420);
-    return () => clearInterval(cycle);
+    const tick = () => {
+      const i = counterRef.current++;
+      const source = SEARCH_SOURCES[i % SEARCH_SOURCES.length];
+      const count = Math.floor(Math.random() * 26) + 4;
+      setRows(prev => [...prev, { id: i, source, count }].slice(-6));
+    };
+    tick();
+    const id = setInterval(tick, 680);
+    return () => clearInterval(id);
   }, []);
 
   return (
-    <div className="source-ticker">
-      <span className="ticker-arrow">→</span>
-      <span className={`ticker-name ${visible ? "ticker-name--in" : "ticker-name--out"}`}>
-        {SEARCH_SOURCES[idx]}
-      </span>
+    <div className="search-feed">
+      {rows.map((row, i) => {
+        const active = i === rows.length - 1;
+        return (
+          <div key={row.id} className={`sfeed-row ${active ? "sfeed-row--active" : "sfeed-row--done"}`}>
+            <span className={`sfeed-dot ${active ? "sfeed-dot--active" : "sfeed-dot--done"}`} />
+            <span className="sfeed-source">{row.source}</span>
+            <span className="sfeed-result">
+              {active ? <span className="sfeed-scanning">scanning…</span> : `${row.count} results`}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -55,15 +75,25 @@ function loadImage(url) {
   });
 }
 
-function drawCoverImage(ctx, img, w, h) {
-  const srcRatio = img.width / img.height;
-  const dstRatio = w / h;
-  let dw = w, dh = h, ox = 0, oy = 0;
-  if (srcRatio > dstRatio) {
-    dh = h; dw = h * srcRatio; ox = (w - dw) / 2;
-  } else {
-    dw = w; dh = w / srcRatio; oy = (h - dh) / 2;
-  }
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeCrop(crop = {}) {
+  return {
+    x: clamp(Number(crop.x ?? 0.5), 0, 1),
+    y: clamp(Number(crop.y ?? 0.5), 0, 1),
+    zoom: clamp(Number(crop.zoom ?? 1), 1, 2.4),
+  };
+}
+
+function drawCoverImage(ctx, img, w, h, crop = {}) {
+  const { x, y, zoom } = normalizeCrop(crop);
+  const scale = Math.max(w / img.width, h / img.height) * zoom;
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  const ox = (w - dw) * x;
+  const oy = (h - dh) * y;
   ctx.drawImage(img, ox, oy, dw, dh);
 }
 
@@ -84,7 +114,7 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
     loadImage("/rossen-reports.png"),
   ]);
 
-  if (bgResult.status === "fulfilled") drawCoverImage(ctx, bgResult.value, width, height);
+  if (bgResult.status === "fulfilled") drawCoverImage(ctx, bgResult.value, width, height, post.crop);
 
   const grad = ctx.createLinearGradient(0, 0, 0, height);
   grad.addColorStop(0,    "rgba(0,0,0,0.04)");
@@ -167,6 +197,7 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
 
 function PostCard({ post }) {
   const [imageIdx, setImageIdx] = useState(0);
+  const [cropByImage, setCropByImage] = useState({});
   const [previewUrl, setPreviewUrl] = useState(null);
   const [rendering, setRendering] = useState(true);
   const renderIdRef = useRef(0);
@@ -176,13 +207,33 @@ function PostCard({ post }) {
 
   const candidates = post.imageCandidates || [];
   const activeImage = candidates[imageIdx] || post.imageUrl || null;
+  const activeCrop = normalizeCrop(cropByImage[activeImage] || {});
+  const cropX = activeCrop.x;
+  const cropY = activeCrop.y;
+  const cropZoom = activeCrop.zoom;
+
+  function updateCrop(patch) {
+    if (!activeImage) return;
+    setCropByImage((prev) => ({
+      ...prev,
+      [activeImage]: normalizeCrop({ ...activeCrop, ...patch }),
+    }));
+  }
+
+  function resetCrop() {
+    if (!activeImage) return;
+    setCropByImage((prev) => ({
+      ...prev,
+      [activeImage]: normalizeCrop(),
+    }));
+  }
 
   useEffect(() => {
     const id = ++renderIdRef.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRendering(true);
     const dpr = window.devicePixelRatio || 2;
-    renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline }, { width: 540 * dpr, height: 675 * dpr })
+    renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline, crop: { x: cropX, y: cropY, zoom: cropZoom } }, { width: 540 * dpr, height: 675 * dpr })
       .then((canvas) => {
         if (renderIdRef.current !== id) return;
         setPreviewUrl(canvas.toDataURL("image/png"));
@@ -193,10 +244,10 @@ function PostCard({ post }) {
         setPreviewUrl(null);
         setRendering(false);
       });
-  }, [post, activeImage, editableHeadline]);
+  }, [post, activeImage, editableHeadline, cropX, cropY, cropZoom]);
 
   async function handleDownload() {
-    const canvas = await renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline }, { width: 1080, height: 1350 });
+    const canvas = await renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline, crop: activeCrop }, { width: 1080, height: 1350 });
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -210,7 +261,7 @@ function PostCard({ post }) {
 
   async function handleCopy() {
     const canvas = await renderPost(
-      { ...post, imageUrl: activeImage, headline: editableHeadline },
+      { ...post, imageUrl: activeImage, headline: editableHeadline, crop: activeCrop },
       { width: 1080, height: 1350 }
     );
     canvas.toBlob(async (blob) => {
@@ -262,6 +313,47 @@ function PostCard({ post }) {
               <span key={i} className={i === 0 ? "hl-brand" : "hl-line"}>{line}</span>
             ))}
             <span className="edit-hint">✎ edit</span>
+          </div>
+        )}
+        {activeImage && (
+          <div className="crop-tools">
+            <div className="crop-row crop-row--head">
+              <span>Crop</span>
+              <button type="button" className="crop-reset-btn" onClick={resetCrop}>Reset</button>
+            </div>
+            <label className="crop-row">
+              <span>Zoom</span>
+              <input
+                type="range"
+                min="1"
+                max="2.4"
+                step="0.05"
+                value={activeCrop.zoom}
+                onChange={(e) => updateCrop({ zoom: Number(e.target.value) })}
+              />
+            </label>
+            <label className="crop-row">
+              <span>Left / Right</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={activeCrop.x}
+                onChange={(e) => updateCrop({ x: Number(e.target.value) })}
+              />
+            </label>
+            <label className="crop-row">
+              <span>Up / Down</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={activeCrop.y}
+                onChange={(e) => updateCrop({ y: Number(e.target.value) })}
+              />
+            </label>
           </div>
         )}
         <div className="post-actions">
@@ -533,6 +625,7 @@ export default function App() {
           title: story.title || "",
           summary: story.rawSummary || "",
           imageQuery: story.imageQuery || "",
+          sourceUrl: story.sourceUrl || "",
         });
         const res = await fetch(`/api/images?${params}`);
         if (res.ok) candidates = await res.json();
@@ -622,9 +715,9 @@ export default function App() {
         {/* ── LOADING ── */}
         {phase === "loading" && (
           <div className="phase-center" aria-live="polite" aria-atomic="true">
-            <div className="loading-ring" />
-            <p className="loading-title">Scanning for today's best deals</p>
-            <SourceTicker />
+            <RadarPulse />
+            <p className="loading-title">Scanning sources…</p>
+            <SearchFeed />
             <p className="loading-status">{fetchProgress.message || "Starting…"}</p>
             <div
               className="fetch-progress-track"

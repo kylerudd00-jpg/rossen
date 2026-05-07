@@ -393,7 +393,7 @@ Return ONLY valid JSON. No markdown, no prose, no citations.
       "summary": "one sentence — the specific verified fact",
       "why_it_matters": "one phrase — why a 60-year-old should care",
       "headline": ["BRAND", "WHAT HAPPENED", "DATE / CONDITION / DETAIL"],
-      "image_query": "5-8 word query for a storefront or exterior photo"
+      "image_query": "5-8 word image search query: storefront/exterior for places, exact product/package for recalls"
     }
   ]
 }`;
