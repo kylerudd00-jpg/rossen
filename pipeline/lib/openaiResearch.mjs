@@ -36,7 +36,30 @@ function cleanLine(value) {
     .trim();
 }
 
-const BANNED_HEADLINE = /\b(deal alert|consumer alert|available now|limited time|new update|this week|freebies|various|several|multiple|deals include|things to know|everything to know)\b/i;
+const BANNED_HEADLINE = /\b(deal alert|consumer alert|available now|limited time|coming soon|available soon|new update|this week|freebies|various|several|multiple|deals include|things to know|everything to know|buy one get one free|sold in retail stores|national .* month deals|check product at home|check your home|popular (?:item|product|dessert)|some (?:items|products)|new deal available|deal available|customers? affected|mother'?s day deal|free item)\b/i;
+
+function hasUsefulThirdLine(line) {
+  const value = String(line || "").trim();
+  if (!value) return false;
+  if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
+    return false;
+  }
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+}
+
+function isWeakHeadlineLines(lines) {
+  if (lines.length !== 3) return true;
+  if ((lines[0].match(/\//g) || []).length > 1) return true;
+  const body = lines.slice(1).join(" ");
+  return !hasUsefulThirdLine(lines[2])
+    || BANNED_HEADLINE.test(body)
+    || /\b(?:SOME\s+)?PRODUCTS? RECALLED\b/i.test(body)
+    || /\bITEMS RECALLED\b/i.test(body)
+    || /\bRECALL ANNOUNCED\b/i.test(body)
+    || /\bCOMPANY MAKES CHANGE\b/i.test(body)
+    || /\bMAKES (?:A\s+)?(?:SUBTLE\s+)?CHANGE TO\b/i.test(body)
+    || /\bWARNING ISSUED FOR\b/i.test(body);
+}
 
 function normalizeHeadline(value, brand) {
   const brandLine = cleanLine(brand || "RETAIL").toUpperCase();
@@ -51,8 +74,7 @@ function normalizeHeadline(value, brand) {
 
   if (lines[0] !== brandLine) lines.unshift(brandLine);
   const finalLines = lines.slice(0, 3);
-  if (finalLines.length < 2) return null;
-  if (BANNED_HEADLINE.test(finalLines.slice(1).join(" "))) return null;
+  if (isWeakHeadlineLines(finalLines)) return null;
   return finalLines.join("\n");
 }
 
@@ -140,6 +162,9 @@ Good stories are:
 Reject:
 - vague shopping tips, listicles, roundups, earnings, investor news, employment news, local-only openings, and old/expired deals
 - articles where the only hook is "deals are available" or "several brands are offering freebies"
+- merged recall roundup articles that combine unrelated products/brands
+- headlines that would need vague phrases like "popular item", "some products", "new deal available", "customers affected", or "limited time"
+- public health alerts/warnings that can only be headlined by falsely calling them recalls
 - anything you cannot verify from a source URL
 
 Research like a careful ChatGPT thread:
@@ -147,6 +172,26 @@ Research like a careful ChatGPT thread:
 - open/read pages when needed instead of relying only on snippets
 - prefer official sources, regulators, AP/Reuters/CNBC/USA Today/People/AARP/Consumer Reports, and strong deal/restaurant sources
 - fact-check the final details before including a story
+
+Headline style learned from the Rossen ChatGPT desk:
+- Exactly 3 lines: BRAND / WHAT HAPPENED / WHY PEOPLE CARE
+- Line 1 is the most recognizable consumer-facing brand, not the corporate owner. For multiple retailers, use the strongest one or two names only.
+- Line 2 must name the exact item, deal, warning, recall, lawsuit, menu item, or change. Never use "popular item", "products recalled", "new deal", or article-title wording.
+- Line 3 must add the catch: exact date, deadline, purchase requirement, rewards/app/ID requirement, select locations, safety risk, legal qualifier, or action to take.
+- For recalls and alerts, use the exact product and risk. Use "RECALLED" only if the source says recall; otherwise use "ALERT" or "WARNING".
+- For deals, name the item and the condition: "BOGO FREE SCOOP / MAY 9TH FOR REWARDS MEMBERS", not "BUY ONE GET ONE FREE / LIMITED TIME".
+- For lawsuits/allegations, use safe language: LAWSUIT CLAIMS, ACCUSED OF, CPSC SAYS, FDA SAYS, CUSTOMERS REPORT.
+
+Good headline examples:
+BASKIN-ROBBINS / BOGO FREE SCOOP / MAY 9TH FOR REWARDS MEMBERS
+ALDI / CRÈME BRÛLÉE RECALLED / POSSIBLE GLASS CONTAMINATION
+ALDI / WALMART / FROZEN PIZZAS ALERT / POSSIBLE SALMONELLA RISK
+GOOD & GATHER / SNACK MIXES RECALLED / POSSIBLE SALMONELLA RISK
+BEST BUY / PRESSURE COOKERS WARNING / CPSC SAYS STOP USING IMMEDIATELY
+COSTCO / $1.50 HOT DOG COMBO UPDATED / WATER NOW AN OPTION
+SHAKE SHACK / FREE BURGERS EVERY WEEK / WITH $10+ PURCHASE ALL MAY
+
+Before finalizing each story, ask: would a 65-year-old understand this instantly and know why they should care? If no, skip or rewrite.
 
 Return JSON only. No markdown. No citations outside the JSON.
 
@@ -160,7 +205,7 @@ Schema:
       "published_at": "YYYY-MM-DD or source date",
       "summary": "one sentence with the exact verified fact",
       "why_it_matters": "short reason this is useful to the audience",
-      "headline": ["BRAND", "SPECIFIC ACTION OR ITEM", "DATE / RISK / CONDITION"],
+      "headline": ["BRAND", "EXACT ITEM / DEAL / WARNING / CHANGE", "DATE / RISK / CONDITION / WHY IT MATTERS"],
       "image_query": "5-8 word query for a real storefront or exterior photo"
     }
   ]
@@ -177,7 +222,7 @@ Prioritize:
 4. major retail/restaurant/service policy changes
 5. new or returning menu items only when the item is specific and timely
 
-Each returned story must have one source URL and a headline that makes sense as a 2-3 line graphic. Return fewer than ${count} if fewer truly qualify.`;
+Each returned story must have one source URL and an exact 3-line headline array. Return fewer than ${count} if fewer truly qualify.`;
 }
 
 function normalizeStory(item, index) {
@@ -281,9 +326,18 @@ Return JSON only:
 Rules:
 - Use only facts in the article title/summary.
 - Do not invent.
+- Write for Americans age 55+, many 75+. It must be clear in 2 seconds.
+- Every option must be exactly 3 useful lines.
+- Line 1 is the recognizable consumer-facing brand, not the corporate owner.
+- If multiple retailers matter, use only the strongest one or two names.
 - Never write generic lines like "DEAL ALERT", "AVAILABLE NOW", "LIMITED TIME", "NEW UPDATE", or "THIS WEEK".
-- Line 2 must name the concrete item/action/risk.
-- Line 3 should be the date, condition, risk, or who qualifies.`,
+- Never write vague lines like "BUY ONE GET ONE FREE", "PRODUCTS RECALLED", "POPULAR ITEM", "NEW DEAL AVAILABLE", or "CHECK PRODUCT AT HOME".
+- Line 2 must name the exact item/deal/warning/change, e.g. "BOGO FREE SCOOP", "SNACK MIXES RECALLED", "FROZEN PIZZAS ALERT", "$2.50 TACOS".
+- Line 3 must add the catch: exact date, purchase condition, rewards/app/ID requirement, select locations, risk, legal qualifier, or action.
+- Use "RECALLED" only if the source says recall. Use "ALERT" or "WARNING" for public health alerts or stop-use notices.
+- For deals, include the item and condition: "BOGO FREE SCOOP / MAY 9TH FOR REWARDS MEMBERS".
+- For allegations, use safe language: "LAWSUIT CLAIMS", "ACCUSED OF", "CPSC SAYS", "FDA SAYS".
+- Before returning, ask: would a 65-year-old instantly know why this matters? Only return yes options.`,
     input: `Brand: ${brand}
 Title: ${candidate.title || ""}
 Summary: ${candidate.rawSummary || candidate.summary || ""}`,

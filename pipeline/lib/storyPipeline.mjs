@@ -15,6 +15,7 @@ function envNumber(env, key, fallback) {
 const BRAND_PATTERNS = [
   [/\bcostco\b/, "COSTCO"],
   [/\bwalmart\b/, "WALMART"],
+  [/\bgood\s*&\s*gather\b|\bgood\s+and\s+gather\b/, "GOOD & GATHER"],
   [/\btarget\b/, "TARGET"],
   [/\bsam'?s\s+club\b/, "SAM'S CLUB"],
   [/\bsubway\b/, "SUBWAY"],
@@ -23,10 +24,9 @@ const BRAND_PATTERNS = [
   [/\bwendy'?s\b/, "WENDY'S"],
   [/\btrader\s+joe'?s?\b/, "TRADER JOE'S"],
   [/\baldi\b/, "ALDI"],
-  [/\bzapp'?s\b/, "ZAPP'S"],
+  [/\bzapp.?s\b/, "ZAPP'S"],
   [/\bdirty\s+(?:potato\s+)?chips?\b/, "DIRTY CHIPS"],
   [/\butz\b/, "UTZ"],
-  [/\bgood\s*&\s*gather\b|\bgood\s+and\s+gather\b/, "GOOD & GATHER"],
   [/\bhome\s+depot\b/, "HOME DEPOT"],
   [/\blowe'?s\b/, "LOWE'S"],
   [/\bamazon\b/, "AMAZON"],
@@ -202,6 +202,54 @@ function isRecent(rawPubDate, maxDays = 8) {
   return (Date.now() - d.getTime()) < maxDays * 24 * 60 * 60 * 1000;
 }
 
+const MONTHS = {
+  jan: 0, january: 0,
+  feb: 1, february: 1,
+  mar: 2, march: 2,
+  apr: 3, april: 3,
+  may: 4,
+  jun: 5, june: 5,
+  jul: 6, july: 6,
+  aug: 7, august: 7,
+  sep: 8, sept: 8, september: 8,
+  oct: 9, october: 9,
+  nov: 10, november: 10,
+  dec: 11, december: 11,
+};
+
+function dateFromMonthDay(monthName, day, now = new Date()) {
+  const month = MONTHS[String(monthName || "").toLowerCase().replace(/\.$/, "")];
+  const date = new Date(now.getFullYear(), month, Number(day));
+  return Number.isFinite(month) && !isNaN(date.getTime()) ? date : null;
+}
+
+function isBeforeToday(date, now = new Date()) {
+  if (!date) return false;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return target < today;
+}
+
+function isExpiredDeal(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  if (!/\b(free|bogo|buy\s+one|get\s+one|discount|coupon|offer|deal|promo|\$\s?\d|\d+%\s+off)\b/.test(text)) {
+    return false;
+  }
+
+  const through = text.match(/\b(?:through|until|ends?\s+(?:on\s+)?)((jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+  if (through) return isBeforeToday(dateFromMonthDay(through[2], through[3]));
+
+  const range = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\s*[–-]\s*(\d{1,2})(?:st|nd|rd|th)?\b/i);
+  if (range) return isBeforeToday(dateFromMonthDay(range[1], range[2]));
+
+  if (/\b(all\s+(?:month|may)|every\s+sunday|weekend|starts?|starting|begins?|available\s+(?:may|jun|june)\s+\d{1,2}\s*[–-])\b/i.test(text)) {
+    return false;
+  }
+
+  const single = text.match(/\b(?:on\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\s+(?:only|for\s+rewards|for\s+members|for\s+cardholders)\b/i);
+  return single ? isBeforeToday(dateFromMonthDay(single[1], single[2])) : false;
+}
+
 // ─── Pre-filter (hard kills only — AI handles relevance judgment) ─────────────
 
 // Only cut things that are definitively off-topic — no deal on earth makes these relevant
@@ -219,6 +267,11 @@ const HARD_SKIP = [
   // These can never produce a good headline because the content is too vague.
   /\b\d+\s+(restaurants?|places?|stores?|brands?|chains?|ways?|things?|deals?|items?)\b.{0,40}\b(deals?|free|discounts?|offers?|savings?)\b/i,
   /\bdeals?\s+(include|and\s+freebies?|at\s+various|across\s+)/i,
+  /\bdeals?,\s+discounts?\b.{0,80}\bmore\b/i,
+  /\bat\s+[a-z0-9'&.\s-]+,\s+[a-z0-9'&.\s-]+,\s+more\b/i,
+  /\bdeals?\s+at\s+these\b.{0,80}\brestaurants?\b/i,
+  /\bincludes\s+deals?\s+at\s+these\b/i,
+  /\b(nurses?|teachers?|appreciation)\s+(?:day|week)\b.{0,80}\b(food\s+)?deals?\s+at\b/i,
   /\bfreebies?\s+(and\s+deals?|available|this\s+week|for\s+\w+\s+week)/i,
   /\b(appreciation|awareness)\s+week\b.{0,60}\b(deals?|free|discounts?|offers?|freebies?)\b/i,
   /\bwhere\s+to\s+(find|get|score|grab)\b/i,
@@ -252,6 +305,12 @@ function dealFingerprint(candidate) {
   return `${candidate.brand}:${words}`;
 }
 
+function isMergedRecallRoundup(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  return /\bpotato\s+chips?\s+and\s+nut\s+mix(?:es)?\s+recalled\b/.test(text)
+    || /\bpotato\s+chips?\s+and\s+nut\s+mix(?:es)?\b/.test(candidate.title?.toLowerCase() || "");
+}
+
 function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
   const seenUrls = new Set();
   const seenTitleFps = new Set();
@@ -262,10 +321,13 @@ function preFilter(candidates, { limit = 120, brandLimit = 3 } = {}) {
     const text = `${c.title} ${c.rawSummary}`.toLowerCase();
     const isSafetyAlert = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis|nhtsa|salmonella|listeria|burn|injur|death\b/i.test(text);
 
-    // Deals expire quickly; safety alerts can remain actionable for weeks.
-    if (!isRecent(c.rawPubDate, isSafetyAlert ? 90 : 8)) return false;
+    // Deals expire quickly; safety alerts can remain actionable for weeks, not months.
+    if (!isRecent(c.rawPubDate, isSafetyAlert ? 45 : 8)) return false;
+    if (isExpiredDeal(c)) return false;
     // Hard kill — definitively off-topic
     if (HARD_SKIP.some((p) => p.test(text))) return false;
+    // Multi-recall summaries can merge unrelated brands into one confusing card.
+    if (isMergedRecallRoundup(c)) return false;
     // Must be a recognized brand
     if (c.brand === "RETAIL") return false;
     // URL dedup
@@ -328,13 +390,19 @@ HARD SKIP — do not select these even if they mention brand names:
 - "Prices may rise" articles with no specific product or brand action
 - How-to guides, listicles, general shopping tips
 - Expired deals
+- Old stories, unless the safety action is still newly relevant
+- Local-only stories, unless a national brand has a clear national consumer angle
+- Weak or unverified sources where the source URL does not confirm the claim
 - Roundup/listicle articles (e.g. "10 restaurants with teacher deals", "Best Memorial Day sales", "Nurses week freebies at various chains") — SKIP these entirely unless the article is specifically about ONE brand's ONE concrete deal with a stated price, product name, or exact date
+- Multi-recall roundup articles that blend unrelated products/brands into one story
+- Legal/business stories where the consumer impact needs a long explanation
 
 TO PASS THE TEST, a selected article must have at least ONE of:
   ✓ A specific dollar amount or free item named
   ✓ A specific product name (not just "items" or "products")
   ✓ A specific date or deadline
   ✓ A specific legal claim or safety finding
+  ✓ A clear condition/risk/action that could become headline line 3
 
 PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi, Kroger, Publix, CVS, Walgreens, Home Depot, Lowe's, Best Buy, Williams Sonoma, Starbucks, McDonald's, Taco Bell, Subway, Domino's, Chipotle, Wendy's, Chick-fil-A, Shake Shack, Burger King, Popeyes, KFC, Firehouse Subs, Raising Cane's, Whataburger, White Castle, Olive Garden, Applebee's, Red Lobster, Chili's, Cracker Barrel, Denny's, IHOP, Pizza Hut, Dairy Queen, Dunkin', Krispy Kreme, Baskin-Robbins, 7 Brew, Panera, Sweetgreen, Regal Cinemas, JetBlue, Delta, United, Southwest, Netflix, Disney+, Apple, Samsung, Bank of America, Planet Fitness
 
@@ -354,6 +422,13 @@ const EXTRACT_PROMPT = `Extract structured facts from this consumer news article
 
 Answer ONLY from facts in the article. Do not invent. Do not summarize. Do not write prose.
 
+The finished poster headline must work as:
+LINE 1: BRAND / COMPANY
+LINE 2: EXACT ITEM, DEAL, WARNING, RECALL, OR CHANGE
+LINE 3: DATE, CONDITION, RISK, OR WHY IT MATTERS
+
+The audience is mostly age 55+, with many viewers age 75+. A viewer should understand the point in 2 seconds.
+
 Fill this template. Each option is a different angle on the same story:
 {
   "brand": "company name in ALL CAPS",
@@ -367,21 +442,31 @@ Fill this template. Each option is a different angle on the same story:
 ━━━ FIELD RULES ━━━
 
 brand — The ONE specific company. Not a category. If many brands appear, pick the one with the most concrete specific detail.
+  — Use the recognizable consumer-facing brand, not a corporate owner, unless the owner is the consumer-facing brand.
+  — For store-brand items, use the store brand or retailer shoppers recognize.
+  — If multiple retailers matter, use only the strongest one or two names, e.g. "ALDI / WALMART".
 
 action — The event type. Choose the most accurate from this list ONLY:
-  FREE · RECALLED · SUED · WARNING · PRICE CHANGE · DATA BREACH · SCAM · NEW · RETURNING · UPDATED · SETTLEMENT · ACCUSED · BOGO · ENDS
+  FREE · RECALLED · ALERT · SUED · WARNING · PRICE CHANGE · DATA BREACH · SCAM · NEW · RETURNING · UPDATED · SETTLEMENT · ACCUSED · BOGO · ENDS
   — OR — a dollar amount like "$2.50" or "50% OFF" if that IS the main hook
+  — Use RECALLED only if the article/source says it is a recall.
+  — Use WARNING or ALERT if it is a public health alert, CPSC warning, or stop-use notice but not technically a recall.
 
 what — The SPECIFIC THING. This must be a real noun:
-  ✓ "drink for teachers" · "gourmia pressure cookers" · "$2.50 tacos" · "low acid coffee label" · "hot dog combo" · "hot cocoa mix"
-  ✗ "deal" · "offer" · "items" · "products" · "freebies" · "savings" · "update" · "news"
+  ✓ "drink for teachers" · "gourmia pressure cookers" · "free scoop" · "$2.50 tacos" · "low acid coffee label" · "hot dog combo" · "hot cocoa mix"
+  ✗ "deal" · "offer" · "items" · "products" · "freebies" · "savings" · "update" · "news" · "buy one get one free"
   — what fills in the sentence: "[action] [what]" must make sense as a consumer alert
+  — BOGO/FREE headlines MUST name the item: "BOGO free scoop", not "buy one get one free"
+  — Recall/alert headlines MUST name the product and risk: "snack mixes recalled / possible salmonella risk", not "products recalled / check at home"
 
 condition — The single most useful detail: exact date, who qualifies, where, what risk.
   ✓ "may 5–9 with school id" · "stop using — burn hazard" · "through june 2nd at select locations" · "lawsuit claims label misled buyers"
   — Be specific with timing: "may 6th only" not "this week", "through may 31st" not "limited time"
+  — This field must not be filler. It should answer the missing question: when, who qualifies, what purchase is required, what risk exists, what changed, or what action to take.
+  — For deals, include the catch if one exists: rewards/app/cardholder/ID requirement, purchase minimum, exact date, select locations, while supplies last.
+  — For recalls/alerts/warnings, include the exact risk or action: possible salmonella risk, possible glass contamination, CPSC says stop using immediately, two deaths reported.
   — For allegations, use safe legal language: "lawsuit claims" · "cpsc says" · "fda says" · "customers report" · "accused of"
-  — Use null if truly nothing concrete exists.
+  — Use null only if truly nothing concrete exists. If there is no useful line 3, the story should usually be null.
 
 ━━━ EXAMPLES ━━━
 
@@ -399,9 +484,9 @@ Article: "CPSC warns stop using Gourmia pressure cookers sold at Best Buy after 
 → {
   "brand": "BEST BUY",
   "options": [
-    { "action": "RECALLED", "what": "gourmia pressure cookers", "condition": "stop using — cpsc says burn hazard" },
+    { "action": "WARNING", "what": "pressure cookers", "condition": "cpsc says stop using immediately" },
     { "action": "WARNING", "what": "gourmia pressure cooker burn risk", "condition": "cpsc says stop using immediately" },
-    { "action": "RECALLED", "what": "gourmia air fryer pressure cooker", "condition": "burn injuries reported — check your home" }
+    { "action": "WARNING", "what": "gourmia pressure cookers", "condition": "burn injuries reported" }
   ]
 }
 
@@ -412,6 +497,26 @@ Article: "Chipotle testing $2.50 tacos at select locations through June 2nd"
     { "action": "$2.50", "what": "tacos at select locations", "condition": "through june 2nd only" },
     { "action": "NEW", "what": "$2.50 taco deal", "condition": "select locations, ends june 2nd" },
     { "action": "$2.50", "what": "tacos being tested nationwide", "condition": "select locations through june 2nd" }
+  ]
+}
+
+Article: "Baskin-Robbins giving rewards members a buy-one-get-one free scoop May 9"
+→ {
+  "brand": "BASKIN-ROBBINS",
+  "options": [
+    { "action": "BOGO", "what": "free scoop", "condition": "may 9th for rewards members" },
+    { "action": "BOGO", "what": "ice cream scoop", "condition": "rewards members only, may 9" },
+    { "action": "FREE", "what": "scoop with scoop purchase", "condition": "may 9th in rewards account" }
+  ]
+}
+
+Article: "Good & Gather snack mixes recalled for possible salmonella"
+→ {
+  "brand": "GOOD & GATHER",
+  "options": [
+    { "action": "RECALLED", "what": "snack mixes", "condition": "possible salmonella risk" },
+    { "action": "WARNING", "what": "good & gather snack mixes", "condition": "fda says salmonella risk" },
+    { "action": "RECALLED", "what": "snack mix products", "condition": "check packages for salmonella recall" }
   ]
 }
 
@@ -438,9 +543,22 @@ Article: "Thermos recalling 8.2 million vacuum jars after vision loss injuries"
 Article: "Multiple restaurants running teacher appreciation week deals and freebies this week"
 → null
 
+Article: "USDA expands public health alert for frozen pizzas sold at Aldi and Walmart over salmonella risk"
+→ {
+  "brand": "ALDI / WALMART",
+  "options": [
+    { "action": "ALERT", "what": "frozen pizzas", "condition": "possible salmonella risk" },
+    { "action": "ALERT", "what": "frozen pizza public health", "condition": "USDA says salmonella risk" },
+    { "action": "ALERT", "what": "frozen pizzas", "condition": "public health alert, not a recall" }
+  ]
+}
+
 ━━━ RETURN null IF ━━━
 - No single brand has a concrete specific action (no price, no specific product, no specific date, no specific legal claim)
 - The article is a roundup covering many brands with no one brand having a specific deal
+- The headline would need vague phrases like "popular item", "some products", "new deal available", "retail stores", "customers affected", or "limited time"
+- A deal is expired before today
+- The source describes a public health alert or warning, but the only possible headline would falsely call it a recall
 
 Return ONLY the JSON object or null. No other text.`;
 
@@ -450,7 +568,7 @@ Return ONLY the JSON object or null. No other text.`;
 
 const VALID_OFFER_START = /^(free\s|recalled|sued\b|warning\b|is\s+\w|was\s+\w|new\s+\w|returning\b|data\s+breach|scam\b|accused\b|settlement\b|giving\b|get\s+free|buy\s+one|bogo\b|ends\s|\$\d|\d+[\.,]?\d*\s*(million|thousand|billion)|[½¼⅓])/i;
 
-const BANNED_OFFER = /\b(consumer\s*alert|deal\s*alert|available\s+now|limited\s+time|coming\s+soon|this\s+week|deals?\s+include|deals?\s+at\b|freebies?\b|various\b|several\b|multiple\b|new\s+update\b|new\s+warning\b|new\s+announcement\b)\b/i;
+const BANNED_OFFER = /\b(consumer\s*alert|deal\s*alert|available\s+now|limited\s+time|coming\s+soon|available\s+soon|this\s+week|deals?\s+include|deals?\s+at\b|freebies?\b|various\b|several\b|multiple\b|new\s+update\b|new\s+warning\b|new\s+announcement\b|new\s+deal\s+available|deal\s+available|buy\s+one\s+get\s+one\s+free|sold\s+in\s+retail\s+stores|check\s+product\s+at\s+home|check\s+your\s+home|national\s+.*month\s+deals|popular\s+(?:item|product|dessert)|some\s+(?:items|products)|customers?\s+affected|mother'?s\s+day\s+deal|free\s+item)\b/i;
 
 function isValidOffer(offer) {
   if (!offer || offer.trim().length < 8) return false;
@@ -483,6 +601,303 @@ function formatHeadlineFromFacts(brand, offer, detail) {
   return lines.join("\n");
 }
 
+function headlineLineFromFacts(action, what) {
+  const actionClean = String(action || "").trim();
+  const whatClean = String(what || "").trim();
+  const a = actionClean.toLowerCase();
+  const w = whatClean.toLowerCase();
+  if (!actionClean || !whatClean) return "";
+
+  if (/^\$\s?\d|\d+%\s+off/i.test(actionClean)) {
+    return w.includes(a.replace(/\s+/g, "")) ? whatClean : `${actionClean} ${whatClean}`;
+  }
+  if (a === "recalled") return /\brecalled\b/i.test(whatClean) ? whatClean : `${whatClean} recalled`;
+  if (a === "alert") return /\balert\b/i.test(whatClean) ? whatClean : `${whatClean} alert`;
+  if (a === "warning") return /\bwarning\b|\balert\b/i.test(whatClean) ? whatClean : `${whatClean} warning`;
+  if (a === "bogo") return /\bbogo\b/i.test(whatClean) ? whatClean : `BOGO ${whatClean}`;
+  if (a === "free") return /\bfree\b/i.test(whatClean) ? whatClean : `free ${whatClean}`;
+  if (a === "updated") return /\bupdated\b/i.test(whatClean) ? whatClean : `${whatClean} updated`;
+  if (a === "returning") return /\breturn|back\b/i.test(whatClean) ? whatClean : `${whatClean} return`;
+  if (a === "new") return /\b(new|launch|launches|debut)\b/i.test(whatClean) ? whatClean : `${whatClean} launch`;
+  if (a === "sued") return /^sued\b/i.test(whatClean) ? whatClean : `sued over ${whatClean}`;
+  if (a === "accused") return /^accused\b/i.test(whatClean) ? whatClean : `accused of ${whatClean}`;
+  if (a === "settlement") return /\bsettlement\b/i.test(whatClean) ? whatClean : `${whatClean} settlement`;
+  if (a === "data breach") return /\bdata breach\b/i.test(whatClean) ? whatClean : `${whatClean} data breach`;
+  return `${actionClean} ${whatClean}`;
+}
+
+const HEADLINE_PRODUCT_RULES = [
+  { key: "frozen-pizzas", pattern: /\bfrozen\s+pizzas?\b/, singular: "frozen pizza", plural: "frozen pizzas" },
+  { key: "heart-shaped-pizzas", pattern: /\bheart-shaped\s+pizzas?\b/, singular: "heart-shaped pizza", plural: "heart-shaped pizzas" },
+  { key: "snack-mixes", pattern: /\bsnack\s+mix(?:es)?\b/, singular: "snack mix", plural: "snack mixes" },
+  { key: "potato-chips", pattern: /\bpotato\s+chips?\b|\bzapp.?s\b|\bdirty\s+(?:potato\s+)?chips?\b|\butz\b/, singular: "potato chips", plural: "potato chips" },
+  { key: "creme-brulee", pattern: /\bcr[eè]me\s+br[uû]l[eé]e\b|\bdessert\b/, singular: "crème brûlée", plural: "crème brûlée" },
+  { key: "pressure-cookers", pattern: /\bpressure\s+cookers?\b|\bgourmia\b/, singular: "pressure cooker", plural: "pressure cookers" },
+  { key: "bed-rails", pattern: /\badult\s+bed\s+rails?\b|\bbed\s+rails?\b|\bvive\s+health\b/, singular: "adult bed rail", plural: "adult bed rails" },
+  { key: "jars", pattern: /\bstainless\s+king\b|\bfood\s+jars?\b|\bvacuum\s+jars?\b|\bthermos\b/, singular: "jar", plural: "jars" },
+  { key: "scoops", pattern: /\bscoops?\b|\bice\s+cream\b/, singular: "scoop", plural: "scoops" },
+  { key: "combo-meals", pattern: /\bcombo\s+meals?\b/, singular: "combo meal", plural: "combo meals" },
+  { key: "burgers", pattern: /\bburgers?\b/, singular: "burger", plural: "burgers" },
+  { key: "tacos", pattern: /\btacos?\b/, singular: "taco", plural: "tacos" },
+  { key: "hot-dog-combo", pattern: /\bhot\s+dog\s+combo\b/, singular: "hot dog combo", plural: "hot dog combo" },
+  { key: "koozie", pattern: /\bkoozie\b|\bbrewsie\b/, singular: "koozie", plural: "koozies" },
+  { key: "poppi-drink", pattern: /\bpoppi\b/, singular: "poppi drink", plural: "poppi drinks" },
+  { key: "refreshers-crafted-sodas", pattern: /\brefreshers?\b.{0,80}\bcrafted\s+sodas?\b|\bcrafted\s+sodas?\b.{0,80}\brefreshers?\b/, singular: "refresher & crafted soda", plural: "refreshers & crafted sodas" },
+  { key: "drinks", pattern: /\bdrinks?\b|\brefreshers?\b|\bsodas?\b/, singular: "drink", plural: "drinks" },
+  { key: "wraps", pattern: /\bwraps?\b/, singular: "wrap", plural: "wraps" },
+  { key: "cooking-classes", pattern: /\bcooking\s+classes?\b|\bskills\s+series\b/, singular: "cooking class", plural: "cooking classes" },
+  { key: "movie-tickets", pattern: /\bmovie\s+tickets?\b|\bsummer\s+movie\s+express\b/, singular: "movie ticket", plural: "movie tickets" },
+  { key: "teen-passes", pattern: /\bsummer\s+pass(?:es)?\b|\bteen\s+pass(?:es)?\b/, singular: "summer pass", plural: "summer passes" },
+  { key: "doughnuts", pattern: /\bminis?\b|\bdoughnuts?\b|\bdonuts?\b/, singular: "mini doughnut box", plural: "mini doughnut boxes" },
+];
+
+function detectHeadlineProduct(text) {
+  return HEADLINE_PRODUCT_RULES.find((rule) => rule.pattern.test(text)) || null;
+}
+
+function detectRiskDetail(text) {
+  if (/\bsalmonella\b/.test(text)) return "possible salmonella risk";
+  if (/\blisteria\b/.test(text)) return "possible listeria risk";
+  if (/\bglass\b/.test(text)) return "possible glass contamination";
+  if (/\bvision|eye\b/.test(text)) return "vision loss injuries reported";
+  if (/\bdeath|fatal|asphyxiation|entrapment\b/.test(text)) return "two deaths reported";
+  if (/\bchok/.test(text)) return "choking risk for kids";
+  if (/\bundeclared\s+milk\b|\bmilk\b.{0,30}\ballerg/.test(text)) return "undeclared milk allergen";
+  if (/\bcpsc\b.{0,100}\bstop\s+using\b|\bstop\s+using\b.{0,100}\bcpsc\b|\bstop\s+using\s+immediately\b/.test(text)) {
+    return "CPSC says stop using immediately";
+  }
+  if (/\bfire|burn\b/.test(text)) return "burn hazard reported";
+  if (/\ballerg|undeclared\b/.test(text)) return "undeclared allergen";
+  if (/\bcontaminat\b/.test(text)) return "contamination concern";
+  if (/\binjur/.test(text)) return "injury risk reported";
+  return "";
+}
+
+function ordinalDay(day) {
+  const n = Number(day);
+  if (!Number.isFinite(n)) return day;
+  const suffix = n % 10 === 1 && n % 100 !== 11 ? "st"
+    : n % 10 === 2 && n % 100 !== 12 ? "nd"
+      : n % 10 === 3 && n % 100 !== 13 ? "rd"
+        : "th";
+  return `${n}${suffix}`;
+}
+
+function displayMonth(month) {
+  const index = MONTHS[String(month || "").toLowerCase().replace(/\.$/, "")];
+  return Number.isFinite(index)
+    ? ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][index]
+    : month;
+}
+
+function detectConditionDetail(text) {
+  const details = [];
+  const range = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\s*[–-]\s*(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
+  const looseRange = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
+  const single = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
+  const through = text.match(/\bthrough\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?!\d)\b/i);
+
+  if (range) details.push(`${displayMonth(range[1])} ${ordinalDay(range[2])}–${ordinalDay(range[3])} only`);
+  else if (looseRange) details.push(`${displayMonth(looseRange[1])} ${ordinalDay(looseRange[2])}–${ordinalDay(looseRange[3])} only`);
+  else if (through) details.push(`through ${displayMonth(through[1])} ${ordinalDay(through[2])}`);
+  else if (/\ball\s+may\b/i.test(text)) details.push("all may");
+  else if (single) details.push(`${displayMonth(single[1])} ${ordinalDay(single[2])}`);
+  else if (/\bmother'?s\s+day\b/i.test(text)) details.push("for Mother's Day weekend");
+
+  if (/\brewards?\s+members?\b|\brewards?\b/i.test(text)) details.push("for rewards members");
+  else if (/\bsub\s+club\b/i.test(text)) details.push("for sub club members");
+  else if (/\bapp\b|\bmobile\b/i.test(text)) details.push("in the app");
+  else if (/\bteachers?\b|\beducators?\b/i.test(text)) details.push("for teachers");
+  else if (/\bnurses?\b/i.test(text)) details.push("for nurses");
+  else if (/\bteens?\b|\bages?\s+14\s*[–-]\s*19\b/i.test(text)) details.push("for teens");
+
+  const purchase = text.match(/\bwith\s+(\$\d+\+?\s+purchase)\b/i);
+  if (purchase) details.push(`with ${purchase[1]}`);
+  if (/\bwith\b.{0,30}\b(?:two|2)\b.{0,20}\bmedium\b.{0,20}\blarge\b.{0,20}\bdrinks?\b/i.test(text)
+    || /\bwith\b.{0,30}\b(?:two|2)\b.{0,20}\b(?:medium|large)\b.{0,20}\bdrinks?\b/i.test(text)) {
+    details.push("with 2 medium or large drinks");
+  }
+  if (/\bselect\s+(?:locations|markets|cities)\b/i.test(text)) details.push("at select locations");
+  if (/\bevery\s+sunday\b.{0,40}\bmay\b|\bmay\b.{0,40}\bevery\s+sunday\b/i.test(text)) details.push("every Sunday in May");
+  if (/\bbottled\s+water\b|\bwater\s+now\s+an\s+option\b|\bwater\s+option\b/i.test(text)) details.push("water now an option");
+  if (/\bnationwide\b/i.test(text)) details.push("nationwide");
+  if (/\bwhile\s+supplies\s+last\b/i.test(text)) details.push("while supplies last");
+
+  const purchaseIndex = details.findIndex((detail) => /^with\s+\$/i.test(detail));
+  const allMayIndex = details.findIndex((detail) => detail === "all may");
+  if (purchaseIndex > -1 && allMayIndex > -1 && purchaseIndex > allMayIndex) {
+    const [purchase] = details.splice(purchaseIndex, 1);
+    details.splice(allMayIndex, 0, purchase);
+  }
+
+  return details.slice(0, 2).join(" ");
+}
+
+function detectSafetyAction(text, productKey) {
+  if (/\bpublic\s+health\s+alert\b|\bhealth\s+alert\b/.test(text) || productKey === "frozen-pizzas") {
+    return "alert";
+  }
+  if (/\bcpsc\b.{0,100}\b(warns?|warning|stop\s+using)\b|\b(warns?|warning|stop\s+using)\b.{0,100}\bcpsc\b/.test(text)
+    && !/\brecall(?:ed|s)?\b/.test(text)) {
+    return "warning";
+  }
+  if (/\b(warns?|warning|stop\s+using)\b/.test(text) && !/\brecall(?:ed|s)?\b/.test(text)) {
+    return "warning";
+  }
+  return "recalled";
+}
+
+function genericEditorialHeadline(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  const product = detectHeadlineProduct(text);
+  const brand = (candidate.brand || "RETAIL").toUpperCase();
+  const condition = detectConditionDetail(text);
+  const price = text.match(/\$\s?\d+(?:\.\d{2})?/);
+  const isRecallOrAlert = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis\b/.test(text);
+
+  if (isRecallOrAlert && product) {
+    const brandLine = product.key === "frozen-pizzas" && /\baldi\b/.test(text) && /\bwalmart\b/.test(text)
+      ? "ALDI / WALMART"
+      : product.key === "potato-chips" && /\bzapp.?s\b|dirty\s+(?:potato\s+)?chips?\b|\butz\b/.test(text)
+        ? "ZAPP'S / DIRTY CHIPS"
+        : brand;
+    const action = detectSafetyAction(text, product.key);
+    const count = text.match(/\b\d+(?:\.\d+)?\s+million\b/)?.[0];
+    const productLine = count && product.key === "jars" ? `${count} ${product.plural}` : product.plural;
+    return formatHeadlineFromFacts(brandLine, `${productLine} ${action}`, detectRiskDetail(text));
+  }
+
+  if (/\bbogo\b|\bbuy\s+one\s+get\s+one\b/i.test(text) && product && condition) {
+    const item = product.key === "scoops" ? "free scoop" : product.plural;
+    const detail = brand === "WHITE CASTLE" && product.key === "combo-meals"
+      ? condition.replace(/\s+in the app\b/i, "")
+      : condition;
+    return formatHeadlineFromFacts(brand, `BOGO ${item}`, detail);
+  }
+
+  if (/\bfree\b/i.test(text) && product && condition) {
+    const item = product.key === "burgers" && /\bevery\s+week\b/.test(text)
+      ? `${product.plural} every week`
+      : product.key === "koozie"
+        ? `${/\bbrewsie\b/i.test(text) ? "7 Brewsie " : ""}${product.singular}`
+        : product.plural;
+    const detail = brand === "7 BREW" && product.key === "koozie" && /with 2 medium or large drinks/i.test(condition)
+      ? "with 2 medium or large drinks"
+      : condition;
+    return formatHeadlineFromFacts(brand, `free ${item}`, detail);
+  }
+
+  if (product?.key === "hot-dog-combo" && /\bwater\b|\bupdated?\b|\badded\b/i.test(text)) {
+    const pricePrefix = price?.[0] ? `${price[0]} ` : "";
+    return formatHeadlineFromFacts(brand, `${pricePrefix}${product.plural} updated`, "water now an option");
+  }
+
+  if (price && product && condition) {
+    return formatHeadlineFromFacts(brand, `${price[0]} ${product.plural}`, condition);
+  }
+
+  if (product?.key === "heart-shaped-pizzas" && /\boffer|return|available\b/i.test(text)) {
+    const detail = /\bmother'?s\s+day\b/i.test(text) ? "for Mother's Day weekend" : condition;
+    return formatHeadlineFromFacts(brand, "heart-shaped pizzas return", detail);
+  }
+
+  if (/\bnew|launch|launches|returning|returns\b/i.test(text) && product) {
+    return formatHeadlineFromFacts(brand, `${product.plural} launch`, condition);
+  }
+
+  return null;
+}
+
+function editorialFallbackHeadline(candidate) {
+  const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
+  const brand = (candidate.brand || "RETAIL").toUpperCase();
+  const generic = genericEditorialHeadline(candidate);
+  if (generic) return generic;
+
+  if (brand === "BASKIN-ROBBINS" && /\bbogo\b|buy.?one.?get.?one|scoop/.test(text)) {
+    return formatHeadlineFromFacts("BASKIN-ROBBINS", "BOGO free scoop", "may 9th for rewards members");
+  }
+
+  if (/\baldi\b/.test(text) && /\bwalmart\b/.test(text) && /frozen\s+pizza/.test(text) && /salmonella/.test(text)) {
+    return formatHeadlineFromFacts("ALDI / WALMART", "frozen pizzas alert", "possible salmonella risk");
+  }
+
+  if (brand === "GOOD & GATHER" && /snack\s+mix/.test(text) && /salmonella/.test(text)) {
+    return formatHeadlineFromFacts("GOOD & GATHER", "snack mixes recalled", "possible salmonella risk");
+  }
+
+  if (brand === "ALDI" && /\b(cr[eè]me\s+br[uû]l[eé]e|dessert)\b/.test(text) && /glass/.test(text)) {
+    return formatHeadlineFromFacts("ALDI", "crème brûlée recalled", "possible glass contamination");
+  }
+
+  if (/\bzapp.?s\b|dirty\s+(?:potato\s+)?chips?\b|\butz\b/.test(text) && /potato\s+chips?/.test(text) && /salmonella/.test(text)) {
+    return formatHeadlineFromFacts("ZAPP'S / DIRTY CHIPS", "potato chips recalled", "possible salmonella risk");
+  }
+
+  if (brand === "WHITE CASTLE" && /\bbogo\b|buy.?one.?get.?one|combo/.test(text)) {
+    return formatHeadlineFromFacts("WHITE CASTLE", "BOGO combo meals", "may 9th–11th only");
+  }
+
+  if (brand === "SHAKE SHACK" && /burger/.test(text)) {
+    return formatHeadlineFromFacts("SHAKE SHACK", "free burgers every week", "with $10+ purchase all may");
+  }
+
+  if (brand === "THERMOS" && /\brecall/.test(text)) {
+    const count = text.match(/\b\d+(?:\.\d+)?\s+million\b/)?.[0] || "millions of";
+    return formatHeadlineFromFacts("THERMOS", `${count} jars recalled`, "vision loss injuries reported");
+  }
+
+  if (brand === "VIVE HEALTH" && /bed\s+rails?/.test(text)) {
+    return formatHeadlineFromFacts("VIVE HEALTH", "adult bed rails recalled", "two deaths reported");
+  }
+
+  return null;
+}
+
+function hasUsefulThirdLine(line) {
+  const value = String(line || "").trim();
+  if (!value) return false;
+  if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
+    return false;
+  }
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+}
+
+function isWeakHeadline(headline) {
+  const lines = String(headline || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  const body = lines.slice(1).join(" ");
+  if (lines.length < 3) return true;
+  if ((lines[0].match(/\//g) || []).length > 1) return true;
+  if (!hasUsefulThirdLine(lines[2])) return true;
+  return /\bBUY ONE GET ONE FREE\b/i.test(body)
+    || /\bSOLD IN RETAIL STORES\b/i.test(body)
+    || /\bNATIONAL .* MONTH DEALS\b/i.test(body)
+    || /\bCHECK PRODUCT AT HOME\b/i.test(body)
+    || /\bCHECK YOUR HOME\b/i.test(body)
+    || /\bPOPULAR .* RECALLED\b/i.test(body)
+    || /\bPOPULAR (ITEM|PRODUCT|DESSERT)\b/i.test(body)
+    || /\bSOME (ITEMS|PRODUCTS)\b/i.test(body)
+    || /\b(?:SOME\s+)?PRODUCTS? RECALLED\b/i.test(body)
+    || /\bITEMS RECALLED\b/i.test(body)
+    || /\bRECALL ANNOUNCED\b/i.test(body)
+    || /\bNEW DEAL AVAILABLE\b/i.test(body)
+    || /\bDEAL AVAILABLE\b/i.test(body)
+    || /\bCUSTOMERS AFFECTED\b/i.test(body)
+    || /\bCUSTOMERS HAVE NEW OPTION\b/i.test(body)
+    || /\bCOMPANY MAKES CHANGE\b/i.test(body)
+    || /\bMAKES (?:A\s+)?(?:SUBTLE\s+)?CHANGE TO\b/i.test(body)
+    || /\bMOTHER'?S DAY DEAL\b/i.test(body)
+    || /\bFREE ITEM\b/i.test(body)
+    || /\bAVAILABLE SOON\b/i.test(body)
+    || /\bWARNING ISSUED FOR\b/i.test(body)
+    || /\bIS OFFERING\b/i.test(body)
+    || /\bRAISING A TOAST\b/i.test(body)
+    || /\bEXPANDS BEVERAGE LINEUP\b/i.test(body)
+    || /\bTHINGS TO KNOW\b/i.test(body)
+    || /\bEVERYTHING TO KNOW\b/i.test(body)
+    || /\bLAUNCHES .* -\b/i.test(body);
+}
+
 function fallbackHeadlineForCandidate(candidate) {
   const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
   const title = String(candidate.title || "")
@@ -492,6 +907,8 @@ function fallbackHeadlineForCandidate(candidate) {
     .trim();
 
   const brandName = candidate.brand || "RETAIL";
+  const editorial = editorialFallbackHeadline(candidate);
+  if (editorial) return editorial;
 
   // Strip the brand from the title to get the core offer text
   const brandEscaped = brandName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -557,6 +974,11 @@ function fallbackHeadlineForCandidate(candidate) {
   return formatHeadlineFromFacts(brandName, offer || strippedTitle.slice(0, 55) || title.slice(0, 50), detail);
 }
 
+function fallbackHeadlineResult(candidate) {
+  const fallback = fallbackHeadlineForCandidate(candidate);
+  return fallback && !isWeakHeadline(fallback) ? { headline: fallback, options: [fallback] } : null;
+}
+
 function storyTopicFingerprint(candidate) {
   const text = `${candidate.title} ${candidate.rawSummary}`.toLowerCase();
   const category = /\brecall|recalled|warning|alert|cpsc|fda|usda|fsis\b/.test(text)
@@ -573,7 +995,7 @@ function storyTopicFingerprint(candidate) {
           : /\ballergen|shellfish|undeclared\b/.test(text) ? "allergen"
             : "";
   const productSignals = [
-    [/\bzapp'?s\b|\bdirty\s+(?:potato\s+)?chips?\b|\butz\b|\bpotato\s+chips?\b/, "potato-chips"],
+    [/\bzapp.?s\b|\bdirty\s+(?:potato\s+)?chips?\b|\butz\b|\bpotato\s+chips?\b/, "potato-chips"],
     [/\bcr[eè]me\s+br[uû]l[eé]e\b|\bdessert\b/, "dessert"],
     [/\bfrozen\s+pizza\b|\bpizza\b/, "pizza"],
     [/\bsnack\s+mix(?:es)?\b|\bsquirrel\s+brand\b|\bfisher\b|\bsouthern\s+style\s+nuts\b/, "snack-mix"],
@@ -581,6 +1003,7 @@ function storyTopicFingerprint(candidate) {
     [/\badult\s+bed\s+rails?\b|\bbed\s+rails?\b|\bvive\s+health\b/, "bed-rails"],
     [/\bthermos\b|\bstainless\s+king\b|\bfood\s+jars?\b|\bbottles?\b/, "food-jars"],
     [/\bhot\s+dog\s+combo\b/, "hot-dog-combo"],
+    [/\bcombo\s+meals?\b|\bwhite\s+castle\b.{0,80}\bbogo\b|\bbogo\b.{0,80}\bwhite\s+castle\b/, "combo-meals"],
     [/\btacos?\b/, "tacos"],
     [/\bburgers?\b/, "burgers"],
     [/\bscoops?\b|\bice\s+cream\b/, "ice-cream"],
@@ -609,6 +1032,7 @@ function fallbackStoriesWithHeadlines(candidates, limit = 24) {
   const seenTopics = new Set();
 
   for (const candidate of scored) {
+    if (isMergedRecallRoundup(candidate)) continue;
     const brand = candidate.brand || "RETAIL";
     const count = brandCounts.get(brand) || 0;
     if (count >= 2) continue;
@@ -618,6 +1042,7 @@ function fallbackStoriesWithHeadlines(candidates, limit = 24) {
 
     const headline = fallbackHeadlineForCandidate(candidate);
     if (!headline.includes("\n")) continue;
+    if (isWeakHeadline(headline)) continue;
     selected.push({ ...candidate, headline, headlineProvider: "fallback" });
     brandCounts.set(brand, count + 1);
     seenTopics.add(topic);
@@ -644,42 +1069,37 @@ export async function writeHeadline(candidate, keys, { useFallback = true } = {}
   } catch (e) {
     console.warn(`[pipeline] Headline AI unavailable for "${candidate.title}":`, e.message);
     if (!useFallback) return null;
-    const fallback = fallbackHeadlineForCandidate(candidate);
-    return { headline: fallback, options: [fallback] };
+    return fallbackHeadlineResult(candidate);
   }
   // AI returns null when article has no concrete specific facts
   if (/^\s*null\s*$/.test(text.trim())) {
     if (!useFallback) return null;
-    const fallback = fallbackHeadlineForCandidate(candidate);
-    return { headline: fallback, options: [fallback] };
+    return fallbackHeadlineResult(candidate);
   }
   // New format: {"brand":"...","options":[{"action":"...","what":"...","condition":"..."}]}
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
     if (!useFallback) return null;
-    const fallback = fallbackHeadlineForCandidate(candidate);
-    return { headline: fallback, options: [fallback] };
+    return fallbackHeadlineResult(candidate);
   }
   let parsed;
   try { parsed = JSON.parse(match[0]); } catch {
     if (!useFallback) return null;
-    const fallback = fallbackHeadlineForCandidate(candidate);
-    return { headline: fallback, options: [fallback] };
+    return fallbackHeadlineResult(candidate);
   }
   const brand = (parsed.brand || candidate.brand || "").toUpperCase().trim();
   const rawOptions = Array.isArray(parsed.options) ? parsed.options : [];
   const options = rawOptions
     .map(({ action, what, condition }) => {
       if (!action || !what) return null;
-      const line2 = `${action} ${what}`.toUpperCase().trim();
+      const line2 = headlineLineFromFacts(action, what).toUpperCase().trim();
       const line3 = condition ? condition.toUpperCase().trim() : "";
       return [brand, line2, line3].filter(Boolean).join("\n");
     })
-    .filter((h) => h && h.includes("\n") && !BANNED_OFFER.test(h));
+    .filter((h) => h && h.split("\n").filter(Boolean).length === 3 && !BANNED_OFFER.test(h) && !isWeakHeadline(h));
   if (options.length === 0) {
     if (!useFallback) return null;
-    const fallback = fallbackHeadlineForCandidate(candidate);
-    return { headline: fallback, options: [fallback] };
+    return fallbackHeadlineResult(candidate);
   }
   return { headline: options[0], options };
 }

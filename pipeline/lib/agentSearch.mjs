@@ -245,7 +245,7 @@ function buildDirectSearchQueries() {
     `Aldi Walmart frozen pizza salmonella alert ${monthYear}`,
     `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
     `Vive Health adult bed rails recall deaths CPSC ${year}`,
-    `White Castle BOGO combo meals Mother's Day ${monthYear}`,
+    `White Castle BOGO combo meals May 9 11 ${year}`,
     `Pizza Hut heart shaped pizza Mother's Day ${monthYear}`,
     `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
     `7 Brew free koozie Mother's Day May 10 ${year}`,

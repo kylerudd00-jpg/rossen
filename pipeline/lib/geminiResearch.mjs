@@ -30,7 +30,30 @@ function cleanLine(value) {
   return String(value || "").replace(/^[\s"'-]+|[\s"'-]+$/g, "").replace(/\s+/g, " ").trim();
 }
 
-const BANNED_HEADLINE = /\b(deal alert|consumer alert|available now|limited time|new update|this week|freebies|various|several|multiple|deals include|things to know|everything to know)\b/i;
+const BANNED_HEADLINE = /\b(deal alert|consumer alert|available now|limited time|coming soon|available soon|new update|this week|freebies|various|several|multiple|deals include|things to know|everything to know|buy one get one free|sold in retail stores|national .* month deals|check product at home|check your home|popular (?:item|product|dessert)|some (?:items|products)|new deal available|deal available|customers? affected|mother'?s day deal|free item)\b/i;
+
+function hasUsefulThirdLine(line) {
+  const value = String(line || "").trim();
+  if (!value) return false;
+  if (/^(LIMITED TIME|AVAILABLE NOW|THIS WEEK|WITH PURCHASE|NEW OPTION|CHECK PRODUCT AT HOME|CHECK YOUR HOME|DETAILS INSIDE)$/i.test(value)) {
+    return false;
+  }
+  return /\b(possible|risk|contamination|allergen|salmonella|listeria|glass|choking|burn|fire|injur|death|vision|cpsc|fda|usda|says|claims|reported|accused|lawsuit|through|until|only|with|for|members|app|cardholders|id|select|locations|nationwide|supplies|water|option|weekend|all\s+may|january|february|march|april|may|june|july|august|september|october|november|december|\$\d|\d+(?:st|nd|rd|th)?\b)\b/i.test(value);
+}
+
+function isWeakHeadlineLines(lines) {
+  if (lines.length !== 3) return true;
+  if ((lines[0].match(/\//g) || []).length > 1) return true;
+  const body = lines.slice(1).join(" ");
+  return !hasUsefulThirdLine(lines[2])
+    || BANNED_HEADLINE.test(body)
+    || /\b(?:SOME\s+)?PRODUCTS? RECALLED\b/i.test(body)
+    || /\bITEMS RECALLED\b/i.test(body)
+    || /\bRECALL ANNOUNCED\b/i.test(body)
+    || /\bCOMPANY MAKES CHANGE\b/i.test(body)
+    || /\bMAKES (?:A\s+)?(?:SUBTLE\s+)?CHANGE TO\b/i.test(body)
+    || /\bWARNING ISSUED FOR\b/i.test(body);
+}
 
 function normalizeHeadline(value, brand) {
   const brandLine = cleanLine(brand || "RETAIL").toUpperCase();
@@ -38,8 +61,7 @@ function normalizeHeadline(value, brand) {
   const lines = rawLines.map((l) => cleanLine(l).toUpperCase()).filter(Boolean).filter((l, i) => i === 0 || l !== brandLine);
   if (lines[0] !== brandLine) lines.unshift(brandLine);
   const finalLines = lines.slice(0, 3);
-  if (finalLines.length < 2) return null;
-  if (BANNED_HEADLINE.test(finalLines.slice(1).join(" "))) return null;
+  if (isWeakHeadlineLines(finalLines)) return null;
   return finalLines.join("\n");
 }
 
@@ -116,7 +138,7 @@ function buildQueries() {
     `Aldi Walmart frozen pizza salmonella alert ${m}`,
     `Best Buy Gourmia pressure cooker warning burn hazard ${year}`,
     `Vive Health adult bed rails recall deaths CPSC ${year}`,
-    `White Castle BOGO combo meals Mother's Day ${m}`,
+    `White Castle BOGO combo meals May 9 11 ${year}`,
     `Pizza Hut heart shaped pizza Mother's Day ${m}`,
     `Baskin Robbins BOGO scoop rewards May 9 ${year}`,
     `7 Brew free koozie Mother's Day May 10 ${year}`,
@@ -269,12 +291,18 @@ HARD REJECT — never pick these:
 - Stories with no specific product, price, or date
 - "Prices may rise" with no named product or brand action
 - Logistics, supply chain, warehouse, distribution stories
+- Multi-recall roundup articles that blend unrelated products/brands into one card
+- Old or expired deals
+- Local-only stories unless a national brand has a clear national consumer angle
+- Weak or unverified sources where the URL does not confirm the claim
+- Stories where the only possible headline would be vague
 
 TO PASS, a story must have at least ONE of:
 ✓ A specific dollar amount or free item named
 ✓ A specific product name (not just "items" or "products")
 ✓ A specific date or deadline
 ✓ A specific legal claim, recall, or safety finding
+✓ A clear condition/risk/action that can become line 3
 
 ━━━ HEADLINE FORMAT ━━━
 Write like a TV consumer-alert graphic. 3 lines, always.
@@ -287,6 +315,19 @@ Line 2: WHAT HAPPENED — use one of these action words:
 Line 3: DATE / CONDITION / DETAIL — one of:
   exact date · deadline · who qualifies · safety risk · where it applies
 
+Line 1 rules:
+  Use the most recognizable consumer-facing brand, not the corporate owner.
+  For store brands, use the retailer/store brand shoppers know.
+  If multiple retailers matter, use only the strongest one or two names.
+
+Line 2 rules:
+  Name the exact product, deal, warning, lawsuit, menu item, or change.
+  Do not copy article-title wording.
+
+Line 3 rules:
+  It must add the catch: exact date, deadline, purchase condition, rewards/app/ID requirement, select locations, safety risk, legal qualifier, what changed, or action to take.
+  It must never be filler.
+
 TIMING — be specific:
   ✓ MAY 6TH ONLY · THROUGH MAY 31ST · WITH $10+ PURCHASE · AT SELECT LOCATIONS
   ✗ soon · limited time · this week
@@ -294,15 +335,27 @@ TIMING — be specific:
 LEGAL SAFETY — never state allegations as facts:
   Use: LAWSUIT CLAIMS · CPSC SAYS · FDA SAYS · CUSTOMERS REPORT · ACCUSED OF
 
+RECALL SAFETY — use the accurate action:
+  Use RECALLED only if the source says recall.
+  Use ALERT for public health alerts.
+  Use WARNING for CPSC/stop-use warnings.
+
 DO NOT split meaning awkwardly:
   ✗ CHIPOTLE / $2.50 / TACOS THROUGH JUNE 2ND
   ✓ CHIPOTLE / $2.50 TACOS / THROUGH JUNE 2ND AT SELECT LOCATIONS
 
 NEVER write: DEAL ALERT · AVAILABLE NOW · NEW UPDATE · THIS WEEK · FREEBIES
+NEVER write vague lines like: BUY ONE GET ONE FREE · PRODUCTS RECALLED · POPULAR ITEM · NEW DEAL AVAILABLE · CUSTOMERS AFFECTED · CHECK PRODUCT AT HOME
+BOGO/FREE headlines must name the item and condition: BOGO FREE SCOOP / MAY 9TH FOR REWARDS MEMBERS
+Recall/alert headlines must name the product and risk: SNACK MIXES RECALLED / POSSIBLE SALMONELLA RISK
 
 GOOD EXAMPLES — match this quality:
+  BASKIN-ROBBINS / BOGO FREE SCOOP / MAY 9TH FOR REWARDS MEMBERS
+  ALDI / CRÈME BRÛLÉE RECALLED / POSSIBLE GLASS CONTAMINATION
+  ALDI / WALMART / FROZEN PIZZAS ALERT / POSSIBLE SALMONELLA RISK
+  GOOD & GATHER / SNACK MIXES RECALLED / POSSIBLE SALMONELLA RISK
   COSTCO / $1.50 HOT DOG COMBO UPDATED / WATER NOW AN OPTION
-  BEST BUY / PRESSURE COOKER WARNING / CPSC SAYS STOP USING IMMEDIATELY
+  BEST BUY / PRESSURE COOKERS WARNING / CPSC SAYS STOP USING IMMEDIATELY
   SHAKE SHACK / FREE BURGERS EVERY WEEK / WITH $10+ PURCHASE ALL MAY
   THERMOS / 8.2 MILLION JARS RECALLED / VISION LOSS INJURIES REPORTED
   TRADER JOE'S / SUED OVER "LOW ACID" COFFEE / LAWSUIT CLAIMS LABEL MISLED BUYERS
