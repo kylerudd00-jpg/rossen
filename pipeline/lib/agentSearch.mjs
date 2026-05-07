@@ -303,6 +303,9 @@ async function runGeminiAgent(geminiKey, searchFn, { maxRounds = 20 } = {}) {
 
 // ─── Groq agentic loop (OpenAI-compatible tool calling) ──────────────────────
 
+// llama-3.3-70b-versatile handles tool calling reliably; 8b-instant fails with 400s
+const GROQ_AGENT_MODEL = "llama-3.3-70b-versatile";
+
 // Keep only the system prompt + the last N rounds of messages to prevent
 // the accumulated tool history from growing large enough to trigger a 413.
 function trimGroqMessages(messages, keepRounds = 3) {
@@ -362,7 +365,7 @@ async function runGroqAgent(groqKey, searchFn, { maxRounds = 20 } = {}) {
         authorization: `Bearer ${groqKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: GROQ_AGENT_MODEL,
         messages: sendMessages,
         tools,
         tool_choice: "auto",
@@ -374,7 +377,7 @@ async function runGroqAgent(groqKey, searchFn, { maxRounds = 20 } = {}) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      if (res.status === 429 || res.status === 413) {
+      if (res.status === 429 || res.status === 413 || res.status === 400) {
         console.warn(`[agent] Groq ${res.status} — stopping early with ${allArticles.length} collected articles`);
         break;
       }
