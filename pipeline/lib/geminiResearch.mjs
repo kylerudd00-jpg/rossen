@@ -160,38 +160,27 @@ async function gatherArticles({ tavilyKey }) {
 
 async function callGemini(apiKey, model, systemPrompt, userPrompt, timeoutMs) {
   const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`;
-  let lastError;
-  for (let attempt = 0; attempt <= 1; attempt++) {
-    if (attempt > 0) {
-      console.warn("[gemini-research] Gemini rate limited, retrying after 65s...");
-      await new Promise((r) => setTimeout(r, 65000));
-    }
-    let res;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (e) {
-      lastError = new Error(`Gemini network error: ${e.message}`);
-      continue;
-    }
-    if (res.ok) {
-      const data = await res.json();
-      return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
-    }
-    const bodyText = await res.text().catch(() => "");
-    lastError = new Error(`Gemini ${res.status}: ${bodyText.slice(0, 200)}`);
-    if (res.status === 429 || res.status >= 500) continue;
-    throw lastError;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    throw new Error(`Gemini network error: ${e.message}`);
   }
-  throw lastError;
+  if (res.ok) {
+    const data = await res.json();
+    return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+  }
+  const bodyText = await res.text().catch(() => "");
+  throw new Error(`Gemini ${res.status}: ${bodyText.slice(0, 200)}`);
 }
 
 async function callGroq(apiKey, systemPrompt, userPrompt, timeoutMs) {
