@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import StoryResearch from "./StoryResearch.jsx";
+import VideoHub from "./VideoHub.jsx";
 
 const SEARCH_SOURCES = [
   "Brave Search", "Tavily", "Google News", "Hip2Save", "Slickdeals",
@@ -750,6 +751,12 @@ export default function App() {
           >
             Story Research
           </button>
+          <button
+            className={`header-tab${activeTab === "video" ? " header-tab--active" : ""}`}
+            onClick={() => setActiveTab("video")}
+          >
+            Video
+          </button>
         </nav>
         {/* desktop right — hidden on mobile */}
 
@@ -789,12 +796,26 @@ export default function App() {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
           <span>Research</span>
         </button>
+        <button
+          className={`bottom-nav-btn${activeTab === "video" ? " bottom-nav-btn--active" : ""}`}
+          onClick={() => setActiveTab("video")}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+          <span>Video</span>
+        </button>
       </nav>
 
       {/* ── Story Research Tab ── */}
       {activeTab === "research" && (
         <main className="app-main app-main--research">
           <StoryResearch onMakePost={makePostFromPacket} />
+        </main>
+      )}
+
+      {/* ── Video Tab ── */}
+      {activeTab === "video" && (
+        <main className="app-main app-main--video">
+          <VideoHub />
         </main>
       )}
 
