@@ -790,7 +790,7 @@ export default async function handler(req, res) {
       segments = await callAI(buildPrompt(mode, query, articlesForAI), process.env);
     } catch (error) {
       console.warn(`[segments] AI unavailable, using fallback: ${error.message}`);
-      send({ type: "progress", message: "AI unavailable; building article-based segment packages…", percent: 75 });
+      send({ type: "progress", message: "AI unavailable; building article-based story packets…", percent: 75 });
       segments = buildFallbackSegments(mode, query, articles);
     }
 
