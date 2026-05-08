@@ -409,6 +409,29 @@ function fallbackSummary(article) {
   return "This article may fit a broader consumer-alert segment. Use the source to confirm the newest details before scripting.";
 }
 
+function pitchFromTopic(topic) {
+  const title = topic.theme || "Consumer Story";
+  if (title.includes("Fees")) return "Show viewers where the extra charges are hiding before they click pay.";
+  if (title.includes("Scam")) return "Warn viewers about the newest version of a familiar scam and the red flags to spot.";
+  if (title.includes("Recall")) return "Give viewers a quick check-your-home story with the products, risks, and next steps.";
+  if (title.includes("Prices") || title.includes("Grocery")) return "Explain why the bill still feels high and where viewers can save right now.";
+  if (title.includes("Travel")) return "Help travelers avoid fees, bad bookings, and refund traps before their next trip.";
+  if (title.includes("Buy") || title.includes("Product")) return "Turn current shopping stories into a practical buy-or-skip segment.";
+  if (title.includes("Savings") || title.includes("Money")) return "Show viewers a concrete way to lower a bill or get money back.";
+  return "Package current consumer stories into one useful viewer-service segment.";
+}
+
+function takeawayFromTopic(topic) {
+  const title = topic.theme || "";
+  if (title.includes("Scam")) return "Know the message, call, or email to ignore before money is at risk.";
+  if (title.includes("Recall")) return "Check the item, model, or product category before using it again.";
+  if (title.includes("Fees") || title.includes("Ticket")) return "Compare the final checkout total, not the first advertised price.";
+  if (title.includes("Streaming")) return "Audit subscriptions and cut the plan or bundle that no longer pays off.";
+  if (title.includes("Prescription")) return "Compare pharmacy prices and discount options before paying cash.";
+  if (title.includes("Travel")) return "Check refund rules, baggage charges, and booking-site fine print before buying.";
+  return "Give viewers one clear check, comparison, or action step they can use today.";
+}
+
 function buildFallbackSegments(mode, query, articles) {
   const groups = FALLBACK_TOPICS.map((topic) => ({ topic, stories: [], score: 0 }));
   const uncategorized = [];
@@ -457,12 +480,23 @@ function buildFallbackSegments(mode, query, articles) {
   return selected.map(({ topic, stories }) => ({
     theme: topic.theme,
     headline: topic.headline,
+    pitchHeadline: topic.theme,
+    pitch: pitchFromTopic(topic),
+    hook: stories[0]?.title || topic.headline,
+    viewerTakeaway: takeawayFromTopic(topic),
+    sourceCount: stories.slice(0, 4).length,
     stories: stories.slice(0, 4).map((article) => ({
       title: article.title || "Untitled story",
       summary: fallbackSummary(article),
       url: article.url,
       source: article.source,
     })),
+    proofPoints: stories.slice(0, 3).map((article) => fallbackSummary(article)),
+    sourceQuestions: [
+      "What is the exact fee, scam, deal, policy, product, or deadline?",
+      "Who is affected and what should viewers do first?",
+      "Can the source show a receipt, screenshot, product page, recall notice, or price comparison?",
+    ],
     angles: topic.angles,
     whyItWorks: [
       "Built from current article search results",
@@ -476,6 +510,12 @@ function buildFallbackSegments(mode, query, articles) {
       "Escalate: Bring in the strongest safety, money, or policy detail",
       "Turn: Explain what changed and who is responsible",
       "Close: Give viewers the exact check, deadline, or next step",
+    ],
+    productionPlan: [
+      "Show the viewer-facing proof: screenshot, bill, receipt, product, app, or checkout page",
+      "Use one real example as the cold open",
+      "Add two source-backed comparisons or warnings",
+      "End with the exact viewer action step",
     ],
   }));
 }
@@ -527,8 +567,8 @@ function buildPrompt(mode, query, articles) {
 
   const instructions = {
     discover: `Find 3–4 strong Rossen-style consumer video bundles from the articles below. Each bundle should be a theme strong enough for a 10-minute segment, with a strong hook, a visible demo or proof point, and an immediate viewer takeaway.\n\n${ROSSEN_STORY_RULES}`,
-    search: `Research this story idea: "${query}". Find supporting evidence, related examples, and multiple angles. Return 2–3 segment bundles based on what you find.`,
-    bundle: `The producer wants to build a longer segment around: "${query}". Find 4–6 related stories from the articles that fit together. Group them into one compelling theme.`,
+    search: `Research this story idea: "${query}". Build 2–3 complete story packets with supporting sources, proof points, viewer takeaways, and production angles.`,
+    bundle: `The producer wants to build a fuller packet around: "${query}". Find 4–6 related source stories that fit together, then package them into one or more complete story packets.`,
     inspire: `Generate 3–4 Jeff Rossen-style consumer story ideas inspired by these articles. Each should feel like something Rossen would actually investigate and present on TV.\n\n${ROSSEN_STORY_RULES}`,
   };
 
@@ -539,13 +579,28 @@ function buildPrompt(mode, query, articles) {
 ARTICLES:
 ${articleText}
 
-Return a JSON array. Each object must use EXACTLY this structure:
+Return a JSON array of story packets. Each object must use EXACTLY this structure:
 [
   {
-    "theme": "Short punchy segment theme, 5–8 words",
+    "theme": "Story lane, 3–6 words",
     "headline": "ON-AIR HEADLINE ALL CAPS UNDER 10 WORDS",
+    "pitchHeadline": "Clickable story-packet headline, Rossen-style and producer-friendly",
+    "pitch": "2-sentence pitch explaining the story, why Jeff would care, and why viewers would click",
+    "hook": "The cold-open moment: bill, text, app screen, product, price tag, recall notice, test, or viewer example",
+    "viewerTakeaway": "One clear thing viewers can do after watching",
+    "sourceCount": 3,
     "stories": [
       { "title": "story title", "summary": "2-sentence summary of consumer impact", "url": "https://...", "source": "domain.com" }
+    ],
+    "proofPoints": [
+      "Specific sourced fact, fee, deal, scam red flag, recall detail, price change, refund step, or policy change",
+      "Second proof point from another source",
+      "Third proof point that makes it feel like a pattern"
+    ],
+    "sourceQuestions": [
+      "Question to answer before producing",
+      "Fact to verify in source material",
+      "Screenshot/demo/proof to collect"
     ],
     "angles": [
       "Angle 1: The problem (what companies are doing)",
@@ -564,11 +619,17 @@ Return a JSON array. Each object must use EXACTLY this structure:
       "Escalate: Third example or expert quote",
       "Turn: Watchdog angle or regulatory action",
       "Close: What viewers should do RIGHT NOW"
+    ],
+    "productionPlan": [
+      "Visual 1: What to show on screen",
+      "Demo/Test: What Jeff can try, compare, or walk through",
+      "Expert/Source: Who or what confirms it",
+      "Close: The viewer checklist"
     ]
   }
 ]
 
-Return 3–4 segment objects. Return ONLY the JSON array — no markdown, no explanation, no extra text.`;
+Return 3–4 story packet objects. Return ONLY the JSON array — no markdown, no explanation, no extra text.`;
 
   return { system, user };
 }
@@ -706,7 +767,7 @@ export default async function handler(req, res) {
   try {
     const { mode = "discover", query } = req.body || {};
 
-    send({ type: "progress", message: "Searching for consumer news stories…", percent: 15 });
+    send({ type: "progress", message: "Searching for story packet sources…", percent: 15 });
 
     const queries = buildQueries(mode, query, process.env);
     const { articles, errors, usedFallback } = await searchNews(queries, process.env);
@@ -722,7 +783,7 @@ export default async function handler(req, res) {
 
     const articlesForAI = articles.slice(0, AI_ARTICLE_LIMIT);
 
-    send({ type: "progress", message: `Analyzing ${articlesForAI.length} articles for segment ideas…`, percent: 55 });
+    send({ type: "progress", message: `Analyzing ${articlesForAI.length} articles for story packets…`, percent: 55 });
 
     let segments;
     try {
@@ -733,7 +794,7 @@ export default async function handler(req, res) {
       segments = buildFallbackSegments(mode, query, articles);
     }
 
-    send({ type: "progress", message: "Building segment packages…", percent: 90 });
+    send({ type: "progress", message: "Building story packets…", percent: 90 });
     send({ type: "done", segments });
   } catch (e) {
     send({ type: "error", message: e.message });

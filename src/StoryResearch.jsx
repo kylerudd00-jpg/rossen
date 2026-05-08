@@ -18,77 +18,132 @@ const MODES = [
   },
 ];
 
-function SegmentCard({ segment, onBundle }) {
+function asList(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function StoryPacketCard({ packet, index, onBundle }) {
   const [expanded, setExpanded] = useState(false);
+  const sources = asList(packet.stories);
+  const proofPoints = asList(packet.proofPoints);
+  const sourceQuestions = asList(packet.sourceQuestions);
+  const angles = asList(packet.angles);
+  const whyItWorks = asList(packet.whyItWorks);
+  const productionPlan = asList(packet.productionPlan).length > 0
+    ? asList(packet.productionPlan)
+    : asList(packet.segmentStructure);
+  const pitchHeadline = packet.pitchHeadline || packet.headline || packet.theme || "Story Packet";
+  const pitch = packet.pitch || sources[0]?.summary || "A Rossen-style consumer story packet with source material and production angles.";
+  const hook = packet.hook || sources[0]?.title || "Start with the clearest viewer-facing proof.";
+  const viewerTakeaway = packet.viewerTakeaway || angles[2] || "Give viewers one clear action step.";
+  const sourceCount = Number(packet.sourceCount || sources.length || 0);
 
   return (
-    <div className="seg-card">
-      <div className="seg-card-top">
-        <div className="seg-theme">{segment.theme}</div>
-        <div className="seg-headline">{segment.headline}</div>
-      </div>
-
-      <div className="seg-stories">
-        {(segment.stories || []).map((s, i) => (
-          <div key={i} className="seg-story">
-            <div className="seg-story-title">{s.title}</div>
-            {s.summary && <div className="seg-story-summary">{s.summary}</div>}
-            {s.url && (
-              <a className="seg-story-link" href={s.url} target="_blank" rel="noreferrer">
-                {s.source || "Source"} ↗
-              </a>
-            )}
-          </div>
-        ))}
-      </div>
-
+    <article className={`packet-card${expanded ? " packet-card--open" : ""}`}>
       <button
-        className="seg-expand-btn"
+        type="button"
+        className="packet-summary"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        {expanded ? "Hide details ▲" : "Show angles & structure ▼"}
+        <span className="packet-kicker">Story Packet {index + 1}</span>
+        {packet.theme && <span className="packet-theme">{packet.theme}</span>}
+        <span className="packet-title">{pitchHeadline}</span>
+        <span className="packet-pitch">{pitch}</span>
+        <span className="packet-meta">
+          <span>{sourceCount} sources</span>
+          <span>{packet.headline || "Pitch ready"}</span>
+          <span>{expanded ? "Close packet" : "Open packet"}</span>
+        </span>
       </button>
 
       {expanded && (
-        <div className="seg-details">
-          {segment.angles?.length > 0 && (
-            <div className="seg-section">
-              <div className="seg-section-label">Segment Angles</div>
-              <ol className="seg-list">
-                {segment.angles.map((a, i) => <li key={i}>{a}</li>)}
-              </ol>
+        <div className="packet-body">
+          <div className="packet-frame">
+            <div className="packet-frame-item">
+              <div className="packet-section-label">Cold Open</div>
+              <p>{hook}</p>
             </div>
+            <div className="packet-frame-item">
+              <div className="packet-section-label">Viewer Takeaway</div>
+              <p>{viewerTakeaway}</p>
+            </div>
+          </div>
+
+          {sources.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Sources</div>
+              <div className="packet-sources">
+                {sources.map((source, i) => (
+                  <div key={`${source.url || source.title || "source"}-${i}`} className="packet-source">
+                    <div className="packet-source-title">{source.title}</div>
+                    {source.summary && <p>{source.summary}</p>}
+                    {source.url && (
+                      <a href={source.url} target="_blank" rel="noreferrer">
+                        {source.source || "Open source"} ↗
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
 
-          {segment.whyItWorks?.length > 0 && (
-            <div className="seg-section">
-              <div className="seg-section-label">Why It Works</div>
-              <ul className="seg-list">
-                {segment.whyItWorks.map((w, i) => <li key={i}>{w}</li>)}
+          {proofPoints.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Proof Points</div>
+              <ul className="packet-list">
+                {proofPoints.map((point, i) => <li key={i}>{point}</li>)}
               </ul>
-            </div>
+            </section>
           )}
 
-          {segment.segmentStructure?.length > 0 && (
-            <div className="seg-section">
-              <div className="seg-section-label">Suggested 10-Min Structure</div>
-              <ol className="seg-list">
-                {segment.segmentStructure.map((s, i) => <li key={i}>{s}</li>)}
+          {sourceQuestions.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Before Producing</div>
+              <ul className="packet-list">
+                {sourceQuestions.map((question, i) => <li key={i}>{question}</li>)}
+              </ul>
+            </section>
+          )}
+
+          {whyItWorks.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Why It Works</div>
+              <ul className="packet-list">
+                {whyItWorks.map((reason, i) => <li key={i}>{reason}</li>)}
+              </ul>
+            </section>
+          )}
+
+          {angles.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Angles</div>
+              <ol className="packet-list">
+                {angles.map((angle, i) => <li key={i}>{angle}</li>)}
               </ol>
-            </div>
+            </section>
+          )}
+
+          {productionPlan.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Production Plan</div>
+              <ol className="packet-list">
+                {productionPlan.map((step, i) => <li key={i}>{step}</li>)}
+              </ol>
+            </section>
           )}
         </div>
       )}
 
       <button
-        className="seg-bundle-btn"
-        onClick={() => onBundle(segment.theme)}
-        title="Find related stories to build a longer segment"
+        type="button"
+        className="packet-related-btn"
+        onClick={() => onBundle(packet.pitchHeadline || packet.theme || packet.headline)}
       >
-        Bundle Related Stories →
+        Build Related Packet →
       </button>
-    </div>
+    </article>
   );
 }
 
@@ -97,7 +152,7 @@ export default function StoryResearch() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("idle"); // idle | loading | done | error
   const [progress, setProgress] = useState({ message: "", percent: 0 });
-  const [segments, setSegments] = useState([]);
+  const [packets, setPackets] = useState([]);
   const [error, setError] = useState(null);
 
   async function runSearch(overrideMode, overrideQuery) {
@@ -108,7 +163,7 @@ export default function StoryResearch() {
 
     setStatus("loading");
     setError(null);
-    setSegments([]);
+    setPackets([]);
     setProgress({ message: "Starting…", percent: 0 });
 
     try {
@@ -136,7 +191,7 @@ export default function StoryResearch() {
           if (event.type === "progress") {
             setProgress({ message: event.message, percent: event.percent });
           } else if (event.type === "done") {
-            setSegments(event.segments || []);
+            setPackets(event.segments || []);
             setStatus("done");
           } else if (event.type === "error") {
             throw new Error(event.message);
@@ -167,7 +222,7 @@ export default function StoryResearch() {
             className={`research-mode-btn${mode === m.id ? " research-mode-btn--active" : ""}`}
             onClick={() => {
               setMode(m.id);
-              setSegments([]);
+              setPackets([]);
               setStatus("idle");
               setError(null);
             }}
@@ -214,8 +269,8 @@ export default function StoryResearch() {
             {status === "loading"
               ? "Searching…"
               : mode === "discover"
-              ? "Find Stories Now →"
-              : "Generate Ideas →"}
+              ? "Generate Story Packets →"
+              : "Generate Packet Ideas →"}
           </button>
         </div>
       )}
@@ -236,14 +291,14 @@ export default function StoryResearch() {
       )}
 
       {/* Results */}
-      {status === "done" && segments.length === 0 && (
-        <div className="research-empty">No segment ideas found. Try a different query or mode.</div>
+      {status === "done" && packets.length === 0 && (
+        <div className="research-empty">No story packets found. Try a different query or mode.</div>
       )}
 
-      {segments.length > 0 && (
-        <div className="seg-grid">
-          {segments.map((seg, i) => (
-            <SegmentCard key={i} segment={seg} onBundle={handleBundle} />
+      {packets.length > 0 && (
+        <div className="packet-grid">
+          {packets.map((packet, i) => (
+            <StoryPacketCard key={i} packet={packet} index={i} onBundle={handleBundle} />
           ))}
         </div>
       )}
