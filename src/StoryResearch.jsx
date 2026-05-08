@@ -4,7 +4,7 @@ const MODES = [
   {
     id: "discover",
     label: "Discover Stories",
-    desc: "Find consumer stories bubbling up right now",
+    desc: "Find Rossen-style video stories bubbling up now",
   },
   {
     id: "search",

@@ -6,30 +6,39 @@ import { parseRssItems } from "../pipeline/lib/rss.mjs";
 export const config = { maxDuration: 60 };
 
 const ROSSEN_THEMES = [
-  "airline fees and travel headaches",
-  "grocery prices and shrinkflation",
-  "retail return policy changes",
-  "dangerous products and recalls",
-  "scams targeting older adults",
-  "hidden fees and fine print",
-  "big company policy changes that cost consumers",
-  "restaurant rewards and app changes",
-  "insurance bills and subscription traps",
-  "banking fees and credit card rule changes",
-  "streaming service price hikes and cancellation tricks",
-  "healthcare billing surprises",
+  "new scams viewers can spot before losing money",
+  "Amazon Prime fees refunds and shopping traps",
+  "Target Walmart Costco Aldi items to buy or skip",
+  "free food app perks and rewards changes",
+  "travel refunds parking fees and booking traps",
+  "product tests that reveal the best buy",
+  "side hustles and simple ways to save money",
+  "home safety demos and delivery warnings",
+  "recalls and product dangers with viewer action steps",
+  "hidden subscription charges and cancellation tricks",
+  "insurance bills banking fees and refund deadlines",
+  "grocery price tricks shrinkflation and clearance markdowns",
 ];
 
 const DISCOVER_QUERIES = [
-  "consumer warning company changes policy 2026",
-  "hidden fees customers paying more 2026",
-  "retail store policy change shoppers affected",
-  "airline fee increase travel alert 2026",
-  "grocery shrinkflation price hike consumers",
-  "scam warning older adults 2026",
-  "product recall safety warning consumers",
-  "subscription trap hidden charge consumer complaint",
+  "new scam warning text refund delivery captcha electric bill 2026",
+  "Amazon Prime hidden fee refund return subscription charge shoppers 2026",
+  "Target Walmart Costco Aldi new items discontinued clearance buy skip 2026",
+  "free fast food restaurant app rewards perks deals this week 2026",
+  "airline refund travel scam airport parking save money fee warning 2026",
+  "best product test comparison air fryer appliance worth it recall warning 2026",
+  "side hustle extra cash warning scam legitimate app 2026",
+  "grocery shrinkflation price drop clearance markdown save money 2026",
+  "car insurance bank fee subscription cancellation refund deadline consumers 2026",
+  "delivery driver package theft home safety warning consumer tips 2026",
 ];
+
+const ROSSEN_STORY_RULES = `Prioritize Rossen-style video stories:
+- a clear viewer payoff: save money, get money back, avoid a scam, avoid a bad buy, or protect your family
+- a concrete hook that can be shown on camera: text message, bill, app screen, product, receipt, policy page, recall item, price tag, travel booking, or side-by-side test
+- a direct action step: what to click, what to check, what to buy or skip, what deadline matters, or who to call
+- practical brands and situations viewers already use: Amazon, Target, Walmart, Costco, Sam's Club, Aldi, fast food apps, airlines, banks, insurers, utilities, delivery services, common appliances
+- segment shapes that work for 10-minute YouTube/video arcs: countdown, expose, buy/skip list, hidden fee breakdown, product test, scam red flags, refund playbook, travel savings, side-hustle reality check`;
 
 const AI_ARTICLE_LIMIT = 24;
 const AI_SUMMARY_LIMIT = 360;
@@ -101,10 +110,43 @@ const FALLBACK_TOPICS = [
       "Angle 3: What to confirm before booking or leaving",
     ],
   },
+  {
+    id: "shopping",
+    theme: "Buy It Or Skip It",
+    headline: "WHAT TO BUY OR SKIP",
+    patterns: [/\bbuy\b/, /\bskip\b/, /\bdeal(s)?\b/, /\bdiscount(s)?\b/, /\bclearance\b/, /\bmarkdown(s)?\b/, /\bfree\b/, /\breward(s)?\b/, /\bperk(s)?\b/, /\btarget\b/, /\bwalmart\b/, /\bcostco\b/, /\baldi\b/, /\bsam'?s club\b/],
+    angles: [
+      "Angle 1: The item or perk viewers are tempted by",
+      "Angle 2: Whether it is really a deal",
+      "Angle 3: The timing, app, or fine print that matters",
+    ],
+  },
+  {
+    id: "tests",
+    theme: "Product Tests And Truth Checks",
+    headline: "IS IT WORTH IT?",
+    patterns: [/\bbest\b/, /\bworst\b/, /\btest(s|ed)?\b/, /\breview(s|ed)?\b/, /\bcompare(s|d|ison)?\b/, /\bworth it\b/, /\bmystery box(es)?\b/, /\bappliance(s)?\b/, /\bair fryer\b/],
+    angles: [
+      "Angle 1: The product claim viewers want tested",
+      "Angle 2: The side-by-side comparison",
+      "Angle 3: The best buy or item to avoid",
+    ],
+  },
+  {
+    id: "money",
+    theme: "Simple Money Moves",
+    headline: "SAVE MONEY NOW",
+    patterns: [/\bsave money\b/, /\bget money back\b/, /\brefund(s)?\b/, /\bcash back\b/, /\bside hustle(s)?\b/, /\bextra cash\b/, /\binsurance\b/, /\bbank\b/, /\bparking\b/],
+    angles: [
+      "Angle 1: The money viewers can save or recover",
+      "Angle 2: The app, form, or call that unlocks it",
+      "Angle 3: The mistake that could cost them",
+    ],
+  },
 ];
 
 function buildQueries(mode, query) {
-  if (mode === "discover") return DISCOVER_QUERIES.slice(0, 6);
+  if (mode === "discover") return DISCOVER_QUERIES.slice(0, 8);
   if (mode === "inspire")
     return ROSSEN_THEMES.slice(0, 6).map((t) => `${t} consumer news 2026`);
   if (mode === "search")
@@ -327,13 +369,13 @@ function buildPrompt(mode, query, articles) {
     .join("\n\n---\n\n");
 
   const instructions = {
-    discover: "Find 3–4 strong consumer story bundles from the articles below. Each bundle should be a theme strong enough for a 10-minute TV segment.",
+    discover: `Find 3–4 strong Rossen-style consumer video bundles from the articles below. Each bundle should be a theme strong enough for a 10-minute segment, with a strong hook, a visible demo or proof point, and an immediate viewer takeaway.\n\n${ROSSEN_STORY_RULES}`,
     search: `Research this story idea: "${query}". Find supporting evidence, related examples, and multiple angles. Return 2–3 segment bundles based on what you find.`,
     bundle: `The producer wants to build a longer segment around: "${query}". Find 4–6 related stories from the articles that fit together. Group them into one compelling theme.`,
-    inspire: `Generate 3–4 Jeff Rossen-style consumer story ideas inspired by these articles. Each should feel like something Rossen would actually investigate and present on TV.`,
+    inspire: `Generate 3–4 Jeff Rossen-style consumer story ideas inspired by these articles. Each should feel like something Rossen would actually investigate and present on TV.\n\n${ROSSEN_STORY_RULES}`,
   };
 
-  const system = `You are a segment producer for Jeff Rossen's consumer news show on NBC. You specialize in finding consumer protection stories that affect everyday Americans — especially older adults, families, travelers, and shoppers. Your job is to package individual stories into compelling 10-minute TV segments.`;
+  const system = `You are a segment producer for Jeff Rossen's consumer video show. You specialize in finding viewer-service stories that help everyday Americans save money, avoid scams, buy smarter, get refunds, and protect their families. Your job is to package individual stories into compelling 10-minute video segments with a fast hook, visible proof, and practical takeaways.`;
 
   const user = `${instructions[mode] || instructions.discover}
 
