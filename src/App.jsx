@@ -498,43 +498,6 @@ function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-function PasswordGate({ children }) {
-  const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem("app_auth") === "1");
-  const [input, setInput] = useState("");
-  const [error, setError] = useState(false);
-
-  if (unlocked) return children;
-
-  function attempt(e) {
-    e.preventDefault();
-    if (input === (import.meta.env.VITE_APP_PASSWORD || "")) {
-      sessionStorage.setItem("app_auth", "1");
-      setUnlocked(true);
-    } else {
-      setError(true);
-      setInput("");
-    }
-  }
-
-  return (
-    <div className="password-gate">
-      <form className="password-form" onSubmit={attempt}>
-        <div className="password-logo">Rossen Reports</div>
-        <input
-          className={`password-input${error ? " password-input--error" : ""}`}
-          type="password"
-          placeholder="Password"
-          value={input}
-          autoFocus
-          onChange={(e) => { setInput(e.target.value); setError(false); }}
-        />
-        {error && <div className="password-error">Incorrect password</div>}
-        <button className="password-btn" type="submit">Enter</button>
-      </form>
-    </div>
-  );
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState("instagram");
   const [phase, setPhase] = useState("idle");
@@ -662,7 +625,6 @@ export default function App() {
   useEffect(() => { fetchStories({ force: true }); }, []);
 
   return (
-    <PasswordGate>
     <div className="app">
 
       {/* ── Header ── */}
@@ -866,6 +828,5 @@ export default function App() {
 
       </main>
     </div>
-    </PasswordGate>
   );
 }
