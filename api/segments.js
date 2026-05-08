@@ -5,42 +5,128 @@ import { parseRssItems } from "../pipeline/lib/rss.mjs";
 
 export const config = { maxDuration: 60 };
 
-const ROSSEN_THEMES = [
-  "new scams viewers can spot before losing money",
-  "Amazon Prime fees refunds and shopping traps",
-  "Target Walmart Costco Aldi items to buy or skip",
-  "free food app perks and rewards changes",
-  "travel refunds parking fees and booking traps",
-  "product tests that reveal the best buy",
-  "side hustles and simple ways to save money",
-  "home safety demos and delivery warnings",
-  "recalls and product dangers with viewer action steps",
-  "hidden subscription charges and cancellation tricks",
-  "insurance bills banking fees and refund deadlines",
-  "grocery price tricks shrinkflation and clearance markdowns",
+const ROSSEN_IDEA_PATTERNS = [
+  {
+    title: "Hidden Fees Are Everywhere: How to Spot Junk Fees Before You Pay",
+    keywords: "hidden fees junk fees ticket fees hotel fees delivery fees FTC rules",
+  },
+  {
+    title: "Amazon Scam Alerts: Fake Texts, Fake Emails, and Fake Recall Notices",
+    keywords: "Amazon scams fake Amazon text Amazon recall scam phishing warning",
+  },
+  {
+    title: "Grocery Prices: Why Your Food Bill Still Feels Too High",
+    keywords: "grocery prices food inflation supermarket deals save money on groceries",
+  },
+  {
+    title: "Product Recalls You Need to Check This Week",
+    keywords: "product recalls FDA recalls CPSC recalls food recalls check your home",
+  },
+  {
+    title: "Senior Scam Alert: Calls, Texts, Emails, and Fake Refunds Targeting Older Adults",
+    keywords: "senior scams Medicare scams Social Security scams FTC scam alert",
+  },
+  {
+    title: "Travel Deals and Traps: Flights, Hotels, Baggage Fees, and Booking Sites",
+    keywords: "travel deals airline fees hotel hidden fees booking scams cheap flights",
+  },
+  {
+    title: "Best Freebies and Deals This Weekend",
+    keywords: "weekend freebies restaurant deals free food BOGO deals family deals",
+  },
+  {
+    title: "Restaurant Value Wars: Who Has the Best Cheap Meals Right Now?",
+    keywords: "fast food deals value menu cheap meals McDonald's deals Taco Bell deals",
+  },
+  {
+    title: "Store Return Policies Are Changing: What Shoppers Need to Know",
+    keywords: "return policy changes Target return policy Walmart returns Amazon returns",
+  },
+  {
+    title: "Credit Card Scam Alert: Fake Lower-Rate Calls and Debt Relief Traps",
+    keywords: "credit card scams lower interest rate scam debt relief scam FTC warning",
+  },
+  {
+    title: "Membership Clubs Compared: Costco vs Sam's Club vs BJ's",
+    keywords: "Costco vs Sam's Club warehouse club deals membership savings BJ's",
+  },
+  {
+    title: "Delivery Apps Exposed: Fees, Markups, Tips, and Sneaky Charges",
+    keywords: "DoorDash fees Uber Eats fees food delivery hidden fees Instacart prices",
+  },
+  {
+    title: "Medical and Pharmacy Savings: How to Pay Less for Prescriptions",
+    keywords: "prescription discounts pharmacy savings GoodRx CVS Walgreens",
+  },
+  {
+    title: "Home Safety Recalls: Appliances, Bed Rails, Batteries, and Kids' Products",
+    keywords: "home product recalls appliance recalls child safety recalls CPSC recalls",
+  },
+  {
+    title: "Mother's Day, Father's Day, and Holiday Freebies You Should Know About",
+    keywords: "Mother's Day deals Father's Day deals holiday freebies restaurant freebies",
+  },
+  {
+    title: "Fake Discounts: How Stores Make Sales Look Better Than They Are",
+    keywords: "fake discounts misleading sales retail pricing tricks BOGO lawsuit",
+  },
+  {
+    title: "Streaming Bills Going Up: How to Cut Netflix, Disney+, Hulu, and Cable Costs",
+    keywords: "streaming prices Netflix price increase cut cable save on streaming",
+  },
+  {
+    title: "Best Things to Buy This Month, and What to Avoid",
+    keywords: "best things to buy this month monthly deals seasonal shopping guide",
+  },
+  {
+    title: "Your Phone Is Listening? What Apps Track and How to Shut It Off",
+    keywords: "app privacy phone tracking location tracking data privacy settings",
+  },
+  {
+    title: "Car Buyer Warning: Dealer Fees, Add-Ons, and Online Price Tricks",
+    keywords: "car dealer fees hidden car fees car buying scams FTC auto dealer warning",
+  },
+  {
+    title: "Ticket Buyer Alert: StubHub, Ticketmaster, SeatGeek, and Hidden Fees",
+    keywords: "ticket fees StubHub refunds Ticketmaster fees concert ticket prices SeatGeek",
+  },
+  {
+    title: "Grocery Store Apps: Coupons, Personalized Prices, and Privacy Concerns",
+    keywords: "grocery app deals personalized pricing digital coupons grocery privacy",
+  },
+  {
+    title: "Free Family Events: Museums, Kids Workshops, Movies, and Store Classes",
+    keywords: "free family events free museum admission kids workshops dollar movies",
+  },
+  {
+    title: "Bank Fees and Refunds: What Customers Can Claim Money For",
+    keywords: "bank fees class action settlements consumer refunds FTC refunds",
+  },
+  {
+    title: "Memorial Day Deals Preview: Grills, Mattresses, Appliances, Patio Sets, and Travel",
+    keywords: "Memorial Day deals grill sales mattress sales appliance discounts patio furniture deals travel",
+  },
 ];
 
-const DISCOVER_QUERIES = [
-  "new scam warning text refund delivery captcha electric bill 2026",
-  "Amazon Prime hidden fee refund return subscription charge shoppers 2026",
-  "Target Walmart Costco Aldi new items discontinued clearance buy skip 2026",
-  "free fast food restaurant app rewards perks deals this week 2026",
-  "airline refund travel scam airport parking save money fee warning 2026",
-  "best product test comparison air fryer appliance worth it recall warning 2026",
-  "side hustle extra cash warning scam legitimate app 2026",
-  "grocery shrinkflation price drop clearance markdown save money 2026",
-  "car insurance bank fee subscription cancellation refund deadline consumers 2026",
-  "delivery driver package theft home safety warning consumer tips 2026",
-];
+const ROSSEN_THEMES = ROSSEN_IDEA_PATTERNS.map((pattern) => pattern.title);
+const DISCOVER_QUERIES = ROSSEN_IDEA_PATTERNS.map((pattern) => `${pattern.keywords} 2026`);
+const DEFAULT_DISCOVER_QUERY_LIMIT = 25;
 
-const ROSSEN_STORY_RULES = `Prioritize Rossen-style video stories:
+const ROSSEN_PATTERN_EXAMPLES = ROSSEN_IDEA_PATTERNS
+  .map((pattern, i) => `${i + 1}. ${pattern.title}\nKeywords: ${pattern.keywords}`)
+  .join("\n");
+
+const ROSSEN_STORY_RULES = `Prioritize Rossen-style video ideas modeled on these examples:
+${ROSSEN_PATTERN_EXAMPLES}
+
+Pattern rules:
 - a clear viewer payoff: save money, get money back, avoid a scam, avoid a bad buy, or protect your family
 - a concrete hook that can be shown on camera: text message, bill, app screen, product, receipt, policy page, recall item, price tag, travel booking, or side-by-side test
 - a direct action step: what to click, what to check, what to buy or skip, what deadline matters, or who to call
 - practical brands and situations viewers already use: Amazon, Target, Walmart, Costco, Sam's Club, Aldi, fast food apps, airlines, banks, insurers, utilities, delivery services, common appliances
-- segment shapes that work for 10-minute YouTube/video arcs: countdown, expose, buy/skip list, hidden fee breakdown, product test, scam red flags, refund playbook, travel savings, side-hustle reality check`;
+- segment shapes that work for 10-minute YouTube/video arcs: alert, expose, comparison, weekend guide, monthly buy/avoid guide, hidden fee breakdown, product test, refund playbook, scam red flags, savings checklist`;
 
-const AI_ARTICLE_LIMIT = 24;
+const AI_ARTICLE_LIMIT = 18;
 const AI_SUMMARY_LIMIT = 360;
 
 const FALLBACK_TOPICS = [
@@ -143,12 +229,83 @@ const FALLBACK_TOPICS = [
       "Angle 3: The mistake that could cost them",
     ],
   },
+  {
+    id: "pharmacy",
+    theme: "Prescription Savings",
+    headline: "PAY LESS FOR MEDS",
+    patterns: [/\bprescription(s)?\b/, /\bpharmacy\b/, /\bgoodrx\b/, /\bcvs\b/, /\bwalgreens\b/, /\bmedicare\b/, /\bdrug price(s)?\b/, /\bdiscount card(s)?\b/],
+    angles: [
+      "Angle 1: The medicine or pharmacy cost viewers recognize",
+      "Angle 2: The discount path that may lower the bill",
+      "Angle 3: The comparison viewers should make before paying",
+    ],
+  },
+  {
+    id: "streaming",
+    theme: "Streaming Bills Going Up",
+    headline: "CUT YOUR STREAMING BILL",
+    patterns: [/\bstreaming\b/, /\bnetflix\b/, /\bdisney\+?\b/, /\bhulu\b/, /\bcable\b/, /\bsubscription(s)?\b/, /\bprice increase\b/, /\bbundle(s)?\b/],
+    angles: [
+      "Angle 1: The price hike or subscription creep",
+      "Angle 2: The plan, bundle, or setting viewers should check",
+      "Angle 3: The cut, pause, or switch that saves money",
+    ],
+  },
+  {
+    id: "privacy",
+    theme: "Phone Privacy Checkup",
+    headline: "CHECK YOUR PHONE SETTINGS",
+    patterns: [/\bphone\b/, /\bapp(s)?\b/, /\bprivacy\b/, /\btracking\b/, /\blocation\b/, /\bdata\b/, /\blistening\b/, /\bsettings\b/],
+    angles: [
+      "Angle 1: The app setting viewers may not realize is on",
+      "Angle 2: The data or location trail at risk",
+      "Angle 3: The exact setting to shut off or review",
+    ],
+  },
+  {
+    id: "cars",
+    theme: "Car Buyer Warning",
+    headline: "WATCH THE DEALER FEES",
+    patterns: [/\bcar\b/, /\bauto\b/, /\bdealer\b/, /\bvehicle\b/, /\badd-on(s)?\b/, /\bonline price\b/, /\bftc auto\b/, /\bfinancing\b/],
+    angles: [
+      "Angle 1: The advertised price versus the final price",
+      "Angle 2: The add-on or fee that changes the deal",
+      "Angle 3: The question buyers should ask before signing",
+    ],
+  },
+  {
+    id: "tickets",
+    theme: "Ticket Buyer Alert",
+    headline: "CHECK TICKET FEES",
+    patterns: [/\bticket(s)?\b/, /\bticketmaster\b/, /\bstubhub\b/, /\bseatgeek\b/, /\bconcert\b/, /\bvenue\b/, /\bevent\b/, /\brefund(s)?\b/],
+    angles: [
+      "Angle 1: The ticket price viewers see first",
+      "Angle 2: The fee, transfer, or refund catch",
+      "Angle 3: The checkout screen viewers should compare",
+    ],
+  },
+  {
+    id: "family",
+    theme: "Free Family Deals",
+    headline: "FREE FAMILY FUN",
+    patterns: [/\bfamily\b/, /\bkids?\b/, /\bmuseum(s)?\b/, /\bworkshop(s)?\b/, /\bfree event(s)?\b/, /\bmovies?\b/, /\bclass(es)?\b/, /\badmission\b/],
+    angles: [
+      "Angle 1: The free or cheap activity families can use",
+      "Angle 2: The date, location, or signup detail",
+      "Angle 3: The catch that could make it sell out or cost more",
+    ],
+  },
 ];
 
-function buildQueries(mode, query) {
-  if (mode === "discover") return DISCOVER_QUERIES.slice(0, 8);
+function envNumber(env, key, fallback) {
+  const parsed = Number(env?.[key]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function buildQueries(mode, query, env = {}) {
+  if (mode === "discover") return DISCOVER_QUERIES.slice(0, envNumber(env, "SEGMENT_DISCOVER_QUERY_LIMIT", DEFAULT_DISCOVER_QUERY_LIMIT));
   if (mode === "inspire")
-    return ROSSEN_THEMES.slice(0, 6).map((t) => `${t} consumer news 2026`);
+    return ROSSEN_THEMES.slice(0, 10).map((t) => `${t} consumer news 2026`);
   if (mode === "search")
     return [query, `${query} consumer complaint warning`, `${query} investigation recall lawsuit`];
   if (mode === "bundle")
@@ -551,7 +708,7 @@ export default async function handler(req, res) {
 
     send({ type: "progress", message: "Searching for consumer news stories…", percent: 15 });
 
-    const queries = buildQueries(mode, query);
+    const queries = buildQueries(mode, query, process.env);
     const { articles, errors, usedFallback } = await searchNews(queries, process.env);
 
     if (articles.length === 0) {
