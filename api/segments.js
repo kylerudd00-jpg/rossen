@@ -34,6 +34,75 @@ const DISCOVER_QUERIES = [
 const AI_ARTICLE_LIMIT = 24;
 const AI_SUMMARY_LIMIT = 360;
 
+const FALLBACK_TOPICS = [
+  {
+    id: "fees",
+    theme: "Hidden Fees And Fine Print",
+    headline: "FEES HITTING YOUR WALLET",
+    patterns: [/\bfee(s)?\b/, /\bsurcharge(s)?\b/, /\bcharge(s|d)?\b/, /\bfine print\b/, /\bcancellation\b/, /\bsubscription\b/, /\bbilling\b/],
+    angles: [
+      "Angle 1: Where the extra cost shows up",
+      "Angle 2: How consumers can miss it",
+      "Angle 3: What viewers should check before paying",
+    ],
+  },
+  {
+    id: "scams",
+    theme: "Scams Targeting Viewers",
+    headline: "NEW SCAMS TO WATCH",
+    patterns: [/\bscam(s|mer)?\b/, /\bfraud\b/, /\bphishing\b/, /\btext(s)?\b/, /\btoll\b/, /\bolder adults?\b/, /\bseniors?\b/],
+    angles: [
+      "Angle 1: The message or call that hooks victims",
+      "Angle 2: The money or data at risk",
+      "Angle 3: The red flags viewers should know",
+    ],
+  },
+  {
+    id: "recalls",
+    theme: "Recalls And Safety Alerts",
+    headline: "CHECK THIS RECALL",
+    patterns: [/\brecall(s|ed)?\b/, /\bsafety\b/, /\bwarning\b/, /\bcontamination\b/, /\ballergy\b/, /\bfda\b/, /\bcpsc\b/, /\bsalmonella\b/, /\blisteria\b/],
+    angles: [
+      "Angle 1: The product or risk viewers need to identify",
+      "Angle 2: Who is most exposed",
+      "Angle 3: What to stop using, return, or check now",
+    ],
+  },
+  {
+    id: "prices",
+    theme: "Prices And Shrinkflation",
+    headline: "WHY YOU MAY PAY MORE",
+    patterns: [/\bprice(s|d)?\b/, /\bpaying more\b/, /\binflation\b/, /\bshrinkflation\b/, /\bgrocery\b/, /\bcost(s)?\b/, /\bincrease\b/],
+    angles: [
+      "Angle 1: The visible price change",
+      "Angle 2: The smaller package or hidden tradeoff",
+      "Angle 3: How shoppers can compare before buying",
+    ],
+  },
+  {
+    id: "policies",
+    theme: "Policy Changes Costing Customers",
+    headline: "NEW RULES FOR CUSTOMERS",
+    patterns: [/\bpolicy\b/, /\brule(s)?\b/, /\breturn(s)?\b/, /\breward(s)?\b/, /\bperk(s)?\b/, /\bmembership\b/, /\bterms\b/, /\bchange(s|d)?\b/],
+    angles: [
+      "Angle 1: The rule that changed",
+      "Angle 2: The customer who loses a benefit or pays more",
+      "Angle 3: The deadline or setting viewers should check",
+    ],
+  },
+  {
+    id: "travel",
+    theme: "Travel Headaches And Fees",
+    headline: "TRAVELERS PAY ATTENTION",
+    patterns: [/\bairline(s)?\b/, /\bflight(s)?\b/, /\btravel(ers?)?\b/, /\bbaggage\b/, /\bhotel(s)?\b/, /\bresort fee\b/, /\bdelay(s|ed)?\b/],
+    angles: [
+      "Angle 1: The trip cost or disruption",
+      "Angle 2: The policy detail travelers may miss",
+      "Angle 3: What to confirm before booking or leaving",
+    ],
+  },
+];
+
 function buildQueries(mode, query) {
   if (mode === "discover") return DISCOVER_QUERIES.slice(0, 6);
   if (mode === "inspire")
@@ -128,6 +197,88 @@ function dedupeArticles(articles) {
     seen.add(a.url);
     return true;
   }).slice(0, 40);
+}
+
+function scoreTopic(article, topic) {
+  const text = `${article.title || ""} ${article.summary || ""} ${article.source || ""}`.toLowerCase();
+  return topic.patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function fallbackSummary(article) {
+  const summary = truncate(article.summary || "", 220);
+  if (summary) return summary;
+  return "This article may fit a broader consumer-alert segment. Use the source to confirm the newest details before scripting.";
+}
+
+function buildFallbackSegments(mode, query, articles) {
+  const groups = FALLBACK_TOPICS.map((topic) => ({ topic, stories: [], score: 0 }));
+  const uncategorized = [];
+
+  for (const article of articles) {
+    const ranked = groups
+      .map((group) => ({ group, score: scoreTopic(article, group.topic) }))
+      .sort((left, right) => right.score - left.score);
+
+    if (ranked[0]?.score > 0) {
+      ranked[0].group.stories.push(article);
+      ranked[0].group.score += ranked[0].score;
+    } else {
+      uncategorized.push(article);
+    }
+  }
+
+  for (const article of uncategorized) {
+    const smallest = groups
+      .filter((group) => group.stories.length > 0)
+      .sort((left, right) => left.stories.length - right.stories.length)[0];
+    if (smallest) smallest.stories.push(article);
+  }
+
+  const selected = groups
+    .filter((group) => group.stories.length > 0)
+    .sort((left, right) => (right.score + right.stories.length) - (left.score + left.stories.length))
+    .slice(0, mode === "search" || mode === "bundle" ? 3 : 4);
+
+  if (selected.length === 0 && articles.length > 0) {
+    selected.push({
+      topic: {
+        theme: query ? `Consumer Angle: ${truncate(query, 42)}` : "Consumer Alerts To Watch",
+        headline: "STORIES TO WATCH",
+        angles: [
+          "Angle 1: The consumer problem",
+          "Angle 2: The money, safety, or time at risk",
+          "Angle 3: What viewers should check next",
+        ],
+      },
+      stories: articles.slice(0, 4),
+      score: 0,
+    });
+  }
+
+  return selected.map(({ topic, stories }) => ({
+    theme: topic.theme,
+    headline: topic.headline,
+    stories: stories.slice(0, 4).map((article) => ({
+      title: article.title || "Untitled story",
+      summary: fallbackSummary(article),
+      url: article.url,
+      source: article.source,
+    })),
+    angles: topic.angles,
+    whyItWorks: [
+      "Built from current article search results",
+      "Multiple examples can establish a pattern",
+      "Consumer impact is visible enough for a service segment",
+      "Sources give producers a fast verification path",
+    ],
+    segmentStructure: [
+      "Open: Start with the clearest viewer cost, risk, or surprise",
+      "Build: Add a second article that shows this is not isolated",
+      "Escalate: Bring in the strongest safety, money, or policy detail",
+      "Turn: Explain what changed and who is responsible",
+      "Close: Give viewers the exact check, deadline, or next step",
+    ],
+  }));
 }
 
 async function searchNews(queries, env) {
@@ -374,7 +525,14 @@ export default async function handler(req, res) {
 
     send({ type: "progress", message: `Analyzing ${articlesForAI.length} articles for segment ideas…`, percent: 55 });
 
-    const segments = await callAI(buildPrompt(mode, query, articlesForAI), process.env);
+    let segments;
+    try {
+      segments = await callAI(buildPrompt(mode, query, articlesForAI), process.env);
+    } catch (error) {
+      console.warn(`[segments] AI unavailable, using fallback: ${error.message}`);
+      send({ type: "progress", message: "AI unavailable; building article-based segment packages…", percent: 75 });
+      segments = buildFallbackSegments(mode, query, articles);
+    }
 
     send({ type: "progress", message: "Building segment packages…", percent: 90 });
     send({ type: "done", segments });
