@@ -66,6 +66,42 @@ const CURATED_EXTERIOR_IMAGES = {
     "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Walmart_store_exterior_5266815680.jpg/1280px-Walmart_store_exterior_5266815680.jpg",
     "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Walmart_4.jpg/1280px-Walmart_4.jpg",
   ],
+  "COSTCO": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/Costcoheadquarters.jpg/1280px-Costcoheadquarters.jpg",
+  ],
+  "SAM'S CLUB": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Sam%27s_Club_in_Onalaska.jpg/1280px-Sam%27s_Club_in_Onalaska.jpg",
+  ],
+  "DOLLAR TREE": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Dollar_Tree_discount_store_exterior_in_Greenville%2C_South_Carolina_02.jpg/1280px-Dollar_Tree_discount_store_exterior_in_Greenville%2C_South_Carolina_02.jpg",
+  ],
+  "DOLLAR GENERAL": [
+    "https://upload.wikimedia.org/wikipedia/commons/a/a1/DGheadquartersTN.jpg",
+  ],
+  "LOWE'S": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0d/A_Lowe%27s_store_in_Murphy%2C_North_Carolina.jpg/1280px-A_Lowe%27s_store_in_Murphy%2C_North_Carolina.jpg",
+  ],
+  "TACO BELL": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Tacobellheadquartersirvine.jpg/1280px-Tacobellheadquartersirvine.jpg",
+  ],
+  "CHICK-FIL-A": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Chick-fil-A.jpg/1280px-Chick-fil-A.jpg",
+  ],
+  "WENDY'S": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Wendy%27s_flagship_restaurant_%28Dublin%2C_Ohio%29.jpg/1280px-Wendy%27s_flagship_restaurant_%28Dublin%2C_Ohio%29.jpg",
+  ],
+  "PANERA": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Panera_Bread_The_Villages_Florida.jpg/1280px-Panera_Bread_The_Villages_Florida.jpg",
+  ],
+  "OLIVE GARDEN": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fc/2021-08-18_19_54_47_The_exterior_front_entrance_of_the_Olive_Garden_in_the_Fair_Lakes_Shopping_Center_in_Fair_Lakes%2C_Fairfax_County%2C_Virginia_during_the_evening.jpg/1280px-thumbnail.jpg",
+  ],
+  "TRADER JOE'S": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/Trader_Joe%27s_in_Chattanooga%2C_Tennessee.jpg/1280px-Trader_Joe%27s_in_Chattanooga%2C_Tennessee.jpg",
+  ],
+  "KROGER": [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Cincinnati-kroger-building.jpg/1280px-Cincinnati-kroger-building.jpg",
+  ],
 };
 
 const POSITIVE_TERMS = [
@@ -252,6 +288,7 @@ function buildExteriorQueries(brand, options = {}) {
 
   const queries = [
     options.aiQuery,
+    options.aiQuery2,
   ];
 
   if (productPhrase && intent !== "venue") {
@@ -448,6 +485,7 @@ function scoreCandidate(candidate, brand, queryIndex, options = {}) {
 
   let score = candidate.source === "source-page" ? 52
     : candidate.source === "google" ? 45
+    : candidate.source === "pexels" ? 44
     : candidate.source === "brave" ? 42
     : candidate.source === "commons" ? 16
     : 10;
@@ -523,6 +561,26 @@ async function fetchGoogleImageCandidates(query, apiKey, cseId, queryIndex = 0) 
 
 export async function fetchGoogleImages(query, apiKey, cseId) {
   return toUrlList(await fetchGoogleImageCandidates(query, apiKey, cseId));
+}
+
+async function fetchPexelsImageCandidates(query, apiKey, queryIndex = 0) {
+  const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=8&orientation=landscape&size=large`;
+  const res = await fetch(url, {
+    headers: { Authorization: apiKey },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.photos || []).map((item) => ({
+    url: item.src?.large2x || item.src?.large || item.src?.original,
+    title: item.alt || query,
+    snippet: item.alt,
+    contextUrl: item.url,
+    sourceDomain: "pexels.com",
+    source: "pexels",
+    query,
+    queryIndex,
+  })).filter((item) => item.url);
 }
 
 async function fetchBraveImageCandidates(query, apiKey, queryIndex = 0) {
@@ -675,7 +733,7 @@ async function fetchFallbackCandidates(brand, options = {}) {
 // aiQuery is used as the first Google/Brave query, but deterministic exterior
 // queries follow it so weak AI queries do not dominate the result set.
 export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = null) {
-  const { GOOGLE_API_KEY: googleKey, GOOGLE_CSE_ID: cseId, BRAVE_API_KEY: braveKey } = env;
+  const { GOOGLE_API_KEY: googleKey, GOOGLE_CSE_ID: cseId, BRAVE_API_KEY: braveKey, PEXELS_API_KEY: pexelsKey } = env;
   const options = typeof optionsOrAiQuery === "string"
     ? { aiQuery: optionsOrAiQuery }
     : (optionsOrAiQuery || {});
@@ -683,12 +741,13 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
   const intent = inferImageIntent(brand, options);
   const queries = buildExteriorQueries(brand, {
     ...options,
-    maxQueries: Number(env.IMAGE_QUERY_LIMIT) || 4,
+    maxQueries: Number(env.IMAGE_QUERY_LIMIT) || 5,
   });
 
   const webSearches = queries.flatMap((query, queryIndex) => [
     googleKey && cseId ? fetchGoogleImageCandidates(query, googleKey, cseId, queryIndex) : Promise.resolve([]),
     braveKey           ? fetchBraveImageCandidates(query, braveKey, queryIndex)          : Promise.resolve([]),
+    pexelsKey          ? fetchPexelsImageCandidates(query, pexelsKey, queryIndex)        : Promise.resolve([]),
   ]);
 
   const [sourceResults, webResults] = await Promise.all([
@@ -700,7 +759,7 @@ export async function searchImagesForBrand(brand, env = {}, optionsOrAiQuery = n
     ...webResults.flatMap((r) => (r.status === "fulfilled" ? r.value : [])),
   ]
     .map((candidate) => ({ ...candidate, score: scoreCandidate(candidate, brand, candidate.queryIndex || 0, options) }))
-    .filter((candidate) => candidate.score >= 28)
+    .filter((candidate) => candidate.score >= 20)
     .sort((a, b) => b.score - a.score);
 
   const seen = new Set();

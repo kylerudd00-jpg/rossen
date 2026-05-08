@@ -116,15 +116,33 @@ const ROSSEN_PATTERN_EXAMPLES = ROSSEN_IDEA_PATTERNS
   .map((pattern, i) => `${i + 1}. ${pattern.title}\nKeywords: ${pattern.keywords}`)
   .join("\n");
 
+const ROSSEN_TITLE_EXAMPLES = [
+  "Sam's Club Is Discontinuing These Items",
+  "ALDI Just Stocked These Rare Items",
+  "Target's New Launch: Buy This, Not That",
+  "Dollar Tree Finds That Won't Last",
+  "The Truth About Kohl's Sales",
+  "Olive Garden Employees Reveal What To Watch For",
+  "Home Repair Scams Are Exploding",
+  "Walmart Got Caught: Why Groceries Are So Expensive",
+  "Costco Free Samples: What They're Not Telling You",
+  "Your Car Is Watching You: Shut This Off",
+];
+
 const ROSSEN_STORY_RULES = `Prioritize Rossen-style video ideas modeled on these examples:
 ${ROSSEN_PATTERN_EXAMPLES}
+
+Use this YouTube-title DNA:
+${ROSSEN_TITLE_EXAMPLES.map((title) => `- ${title}`).join("\n")}
 
 Pattern rules:
 - a clear viewer payoff: save money, get money back, avoid a scam, avoid a bad buy, or protect your family
 - a concrete hook that can be shown on camera: text message, bill, app screen, product, receipt, policy page, recall item, price tag, travel booking, or side-by-side test
 - a direct action step: what to click, what to check, what to buy or skip, what deadline matters, or who to call
 - practical brands and situations viewers already use: Amazon, Target, Walmart, Costco, Sam's Club, Aldi, fast food apps, airlines, banks, insurers, utilities, delivery services, common appliances
-- segment shapes that work for 10-minute YouTube/video arcs: alert, expose, comparison, weekend guide, monthly buy/avoid guide, hidden fee breakdown, product test, refund playbook, scam red flags, savings checklist`;
+- segment shapes that work for 10-minute YouTube/video arcs: alert, expose, comparison, weekend guide, monthly buy/avoid guide, hidden fee breakdown, product test, refund playbook, scam red flags, savings checklist
+- every pitchHeadline must name a concrete store, product, service, scam type, fee type, recall category, or setting viewers can check
+- do not return broad bucket names like "Scams Targeting Viewers", "Recalls And Safety Alerts", "Hidden Fees And Fine Print", or "Prices And Shrinkflation" as pitchHeadline`;
 
 const AI_ARTICLE_LIMIT = 18;
 const AI_SUMMARY_LIMIT = 360;
@@ -299,6 +317,139 @@ const FALLBACK_TOPICS = [
   },
 ];
 
+const KNOWN_BRANDS = [
+  ["ALDI", /\baldi\b/i],
+  ["Amazon", /\bamazon\b/i],
+  ["Apple", /\bapple\b/i],
+  ["AT&T", /\bat&t\b|\batt\b/i],
+  ["BJ's", /\bbj'?s\b/i],
+  ["Burger King", /\bburger king\b/i],
+  ["CarMax", /\bcarmax\b/i],
+  ["Carvana", /\bcarvana\b/i],
+  ["Cheesecake Factory", /\bcheesecake factory\b/i],
+  ["Chick-fil-A", /\bchick-fil-a\b|\bchick fil a\b/i],
+  ["Costco", /\bcostco\b/i],
+  ["CVS", /\bcvs\b/i],
+  ["Disney+", /\bdisney\+?\b/i],
+  ["Dollar General", /\bdollar general\b/i],
+  ["Dollar Tree", /\bdollar tree\b/i],
+  ["DoorDash", /\bdoordash\b/i],
+  ["Ford", /\bford\b/i],
+  ["GoodRx", /\bgoodrx\b/i],
+  ["Google", /\bgoogle\b/i],
+  ["Home Depot", /\bhome depot\b/i],
+  ["Hulu", /\bhulu\b/i],
+  ["Instacart", /\binstacart\b/i],
+  ["Kohl's", /\bkohl'?s\b/i],
+  ["Lowe's", /\blowe'?s\b/i],
+  ["Marshalls", /\bmarshalls\b/i],
+  ["McDonald's", /\bmcdonald'?s\b/i],
+  ["Medicare", /\bmedicare\b/i],
+  ["Netflix", /\bnetflix\b/i],
+  ["Nordstrom Rack", /\bnordstrom rack\b/i],
+  ["Olive Garden", /\bolive garden\b/i],
+  ["Sam's Club", /\bsam'?s club\b/i],
+  ["SeatGeek", /\bseatgeek\b/i],
+  ["Social Security", /\bsocial security\b/i],
+  ["StubHub", /\bstubhub\b/i],
+  ["T-Mobile", /\bt-mobile\b|\btmobile\b/i],
+  ["T.J. Maxx", /\bt\.?j\.? maxx\b|\btj maxx\b/i],
+  ["Taco Bell", /\btaco bell\b/i],
+  ["Target", /\btarget\b/i],
+  ["Tesla", /\btesla\b/i],
+  ["Ticketmaster", /\bticketmaster\b/i],
+  ["Toyota", /\btoyota\b/i],
+  ["Trader Joe's", /\btrader joe'?s\b/i],
+  ["Uber Eats", /\buber eats\b/i],
+  ["Verizon", /\bverizon\b/i],
+  ["Walgreens", /\bwalgreens\b/i],
+  ["Walmart", /\bwalmart\b/i],
+  ["Wendy's", /\bwendy'?s\b/i],
+  ["Whole Foods", /\bwhole foods\b/i],
+];
+
+const SPECIFIC_HOOK_PATTERNS = [
+  { pattern: /\bdiscontinu(ing|ed|es)?\b/i, score: 14 },
+  { pattern: /\bwon'?t last\b|\blast chance\b|\brare\b|\blimited[- ]time\b/i, score: 13 },
+  { pattern: /\bnew at\b|\bjust stocked\b|\bnew launch\b|\bnew items?\b/i, score: 12 },
+  { pattern: /\bbuy this\b|\bskip\b|\bwhat to buy\b|\bwhat to avoid\b/i, score: 11 },
+  { pattern: /\btruth about\b|\bthey'?re hiding\b|\bwhat they don'?t\b|\bnot telling you\b/i, score: 12 },
+  { pattern: /\bcaught\b|\bexposed\b|\breveal(s|ed|ing)?\b|\bemployees?\b/i, score: 10 },
+  { pattern: /\bscam(s)?\b|\bfake\b|\bphishing\b|\bfraud\b|\bimposter\b/i, score: 10 },
+  { pattern: /\brecall(s|ed)?\b|\bsafety alert\b|\bcontamination\b|\ballergy alert\b/i, score: 10 },
+  { pattern: /\bhidden fee(s)?\b|\bjunk fee(s)?\b|\bsneaky charge(s)?\b|\bsurcharge(s)?\b/i, score: 10 },
+  { pattern: /\bprice(s)? (just )?(crashed|dropped|cut|slashed)\b|\bmarkdown(s)?\b|\bclearance\b/i, score: 9 },
+  { pattern: /\bfree samples?\b|\bfreebies?\b|\bbogo\b|\bweekend deal(s)?\b/i, score: 8 },
+  { pattern: /\bself[- ]checkout\b|\bwatching you\b|\btracking\b|\bshut this off\b|\bprivacy setting(s)?\b/i, score: 9 },
+  { pattern: /\$\d+|\b\d+%\b|\b\d+\s+(items?|products?|recalls?|fees?|deals?|ways?)\b/i, score: 6 },
+];
+
+const GENERIC_STORY_PATTERNS = [
+  /\bstate attorneys? general\b/i,
+  /\bregulatory oversight\b/i,
+  /\bcenter for american progress\b/i,
+  /\bpress release\b/i,
+  /\btranscript\b/i,
+  /\bplan to make\b/i,
+  /\beconomy\b/i,
+  /\bcontinued enforcement\b/i,
+  /\bmayor\b/i,
+  /\bgovernor\b/i,
+];
+
+const TOPIC_THEME_LABELS = {
+  cars: "Car Privacy Check",
+  family: "Family Deal Alert",
+  fees: "Fee Watch",
+  money: "Money Back Alert",
+  pharmacy: "Pharmacy Savings",
+  policies: "Policy Change",
+  prices: "Price Check",
+  privacy: "Privacy Check",
+  recalls: "Recall Alert",
+  scams: "Scam Alert",
+  shopping: "Buy Or Skip",
+  streaming: "Streaming Savings",
+  tests: "Truth Check",
+  tickets: "Ticket Buyer Alert",
+  travel: "Travel Warning",
+};
+
+const STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "before",
+  "but",
+  "by",
+  "for",
+  "from",
+  "how",
+  "in",
+  "is",
+  "it",
+  "new",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "these",
+  "this",
+  "to",
+  "what",
+  "when",
+  "where",
+  "why",
+  "with",
+  "you",
+  "your",
+]);
+
 function envNumber(env, key, fallback) {
   const parsed = Number(env?.[key]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -417,126 +568,406 @@ function dedupeArticles(articles) {
   }).slice(0, 40);
 }
 
+function normalizeText(text = "") {
+  return String(text)
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, "\"")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanTitle(title = "") {
+  const normalized = normalizeText(title).replace(/\s+\|\s+.+$/, "");
+  const parts = normalized.split(/\s+-\s+/);
+  if (parts.length > 1 && parts[parts.length - 1].length <= 52) {
+    return parts.slice(0, -1).join(" - ").trim();
+  }
+  return normalized;
+}
+
+function articleText(article) {
+  return normalizeText(`${article.title || ""} ${article.summary || ""} ${article.source || ""}`);
+}
+
 function scoreTopic(article, topic) {
-  const text = `${article.title || ""} ${article.summary || ""} ${article.source || ""}`.toLowerCase();
+  const text = articleText(article).toLowerCase();
   return topic.patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0);
 }
 
 function fallbackSummary(article) {
   const summary = truncate(article.summary || "", 220);
   if (summary) return summary;
-  return "This article may fit a broader consumer-alert segment. Use the source to confirm the newest details before scripting.";
+  return "Use this source to confirm the newest details, then show viewers the exact receipt, screenshot, item, fee, warning, or policy page.";
 }
 
-function pitchFromTopic(topic) {
-  const title = topic.theme || "Consumer Story";
-  if (title.includes("Fees")) return "Show viewers where the extra charges are hiding before they click pay.";
-  if (title.includes("Scam")) return "Warn viewers about the newest version of a familiar scam and the red flags to spot.";
-  if (title.includes("Recall")) return "Give viewers a quick check-your-home story with the products, risks, and next steps.";
-  if (title.includes("Prices") || title.includes("Grocery")) return "Explain why the bill still feels high and where viewers can save right now.";
-  if (title.includes("Travel")) return "Help travelers avoid fees, bad bookings, and refund traps before their next trip.";
-  if (title.includes("Buy") || title.includes("Product")) return "Turn current shopping stories into a practical buy-or-skip segment.";
-  if (title.includes("Savings") || title.includes("Money")) return "Show viewers a concrete way to lower a bill or get money back.";
-  return "Package current consumer stories into one useful viewer-service segment.";
+function detectBrand(articleOrText) {
+  const text = typeof articleOrText === "string"
+    ? normalizeText(articleOrText)
+    : normalizeText(`${articleOrText.title || ""} ${articleOrText.summary || ""}`);
+  return KNOWN_BRANDS.find(([, pattern]) => pattern.test(text))?.[0] || "";
 }
 
-function takeawayFromTopic(topic) {
-  const title = topic.theme || "";
-  if (title.includes("Scam")) return "Know the message, call, or email to ignore before money is at risk.";
-  if (title.includes("Recall")) return "Check the item, model, or product category before using it again.";
-  if (title.includes("Fees") || title.includes("Ticket")) return "Compare the final checkout total, not the first advertised price.";
-  if (title.includes("Streaming")) return "Audit subscriptions and cut the plan or bundle that no longer pays off.";
-  if (title.includes("Prescription")) return "Compare pharmacy prices and discount options before paying cash.";
-  if (title.includes("Travel")) return "Check refund rules, baggage charges, and booking-site fine print before buying.";
-  return "Give viewers one clear check, comparison, or action step they can use today.";
+function bestTopicForArticle(article) {
+  const title = cleanTitle(article.title || "").toLowerCase();
+  const ranked = FALLBACK_TOPICS
+    .map((topic) => ({
+      topic,
+      score: scoreTopic(article, topic) + (topic.patterns.reduce((count, pattern) => count + (pattern.test(title) ? 1 : 0), 0) * 2),
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  return ranked[0]?.score > 0
+    ? ranked[0].topic
+    : FALLBACK_TOPICS.find((topic) => topic.id === "shopping");
 }
 
-function buildFallbackSegments(mode, query, articles) {
-  const groups = FALLBACK_TOPICS.map((topic) => ({ topic, stories: [], score: 0 }));
-  const uncategorized = [];
+function titleWords(text, count) {
+  return normalizeText(text)
+    .split(/\s+/)
+    .slice(0, count)
+    .join(" ")
+    .replace(/[,.:;]+$/, "");
+}
 
-  for (const article of articles) {
-    const ranked = groups
-      .map((group) => ({ group, score: scoreTopic(article, group.topic) }))
-      .sort((left, right) => right.score - left.score);
+function titleKeywords(articleOrText) {
+  const text = typeof articleOrText === "string" ? articleOrText : cleanTitle(articleOrText.title || "");
+  return normalizeText(text)
+    .toLowerCase()
+    .split(/[^a-z0-9+']+/)
+    .map((word) => word.replace(/'s$/, ""))
+    .filter((word) => word.length > 2 && !STOPWORDS.has(word))
+    .slice(0, 20);
+}
 
-    if (ranked[0]?.score > 0) {
-      ranked[0].group.stories.push(article);
-      ranked[0].group.score += ranked[0].score;
-    } else {
-      uncategorized.push(article);
-    }
+function titleFingerprint(text) {
+  return titleKeywords(text).slice(0, 8).join("-");
+}
+
+function compactHeadline(text, limit = 86) {
+  const clean = cleanTitle(text);
+  if (clean.length <= limit) return clean;
+  return `${clean.split(/\s+/).slice(0, 12).join(" ")}...`;
+}
+
+function articleSpecificityScore(article, topic) {
+  const text = articleText(article);
+  const title = cleanTitle(article.title || "");
+  const brand = detectBrand(article);
+  let score = scoreTopic(article, topic) * 5;
+
+  if (brand) score += 14;
+  if (title.length >= 24 && title.length <= 115) score += 4;
+  if (titleKeywords(title).length >= 4) score += 3;
+
+  for (const hook of SPECIFIC_HOOK_PATTERNS) {
+    if (hook.pattern.test(text)) score += hook.score;
   }
 
-  for (const article of uncategorized) {
-    const smallest = groups
-      .filter((group) => group.stories.length > 0)
-      .sort((left, right) => left.stories.length - right.stories.length)[0];
-    if (smallest) smallest.stories.push(article);
+  for (const pattern of GENERIC_STORY_PATTERNS) {
+    if (pattern.test(text)) score -= brand ? 4 : 12;
   }
 
-  const selected = groups
-    .filter((group) => group.stories.length > 0)
-    .sort((left, right) => (right.score + right.stories.length) - (left.score + left.stories.length))
-    .slice(0, mode === "search" || mode === "bundle" ? 3 : 4);
+  return score;
+}
 
-  if (selected.length === 0 && articles.length > 0) {
-    selected.push({
-      topic: {
-        theme: query ? `Consumer Angle: ${truncate(query, 42)}` : "Consumer Alerts To Watch",
-        headline: "STORIES TO WATCH",
-        angles: [
-          "Angle 1: The consumer problem",
-          "Angle 2: The money, safety, or time at risk",
-          "Angle 3: What viewers should check next",
-        ],
-      },
-      stories: articles.slice(0, 4),
-      score: 0,
-    });
-  }
+function leadPhrase(title) {
+  return titleWords(cleanTitle(title).replace(/^(consumer alert|alert|warning|watchdog|recall alert)\s*:?\s*/i, ""), 8);
+}
 
-  return selected.map(({ topic, stories }) => ({
-    theme: topic.theme,
-    headline: topic.headline,
-    pitchHeadline: topic.theme,
-    pitch: pitchFromTopic(topic),
-    hook: stories[0]?.title || topic.headline,
-    viewerTakeaway: takeawayFromTopic(topic),
-    sourceCount: stories.slice(0, 4).length,
-    stories: stories.slice(0, 4).map((article) => ({
-      title: article.title || "Untitled story",
+function feeSubject(article) {
+  const text = articleText(article).toLowerCase();
+  if (/\bticket(s)?\b|\bticketmaster\b|\bstubhub\b|\bseatgeek\b/.test(text)) return "Ticket";
+  if (/\bhotel(s)?\b|\bresort\b|\bbooking\b/.test(text)) return "Hotel";
+  if (/\bdelivery\b|\bdoordash\b|\buber eats\b|\binstacart\b/.test(text)) return "Delivery App";
+  if (/\bairline(s)?\b|\bflight(s)?\b|\bbaggage\b/.test(text)) return "Airline";
+  if (/\bbank(s)?\b|\bchecking\b|\boverdraft\b/.test(text)) return "Bank";
+  if (/\bdealer\b|\bauto\b|\bcar\b|\bvehicle\b/.test(text)) return "Car Dealer";
+  return "Hidden";
+}
+
+function makeRossenPitchHeadline(article, topic) {
+  const text = articleText(article);
+  const lower = text.toLowerCase();
+  const brand = detectBrand(article);
+  const lead = leadPhrase(article.title || topic.theme);
+
+  if (/\bamazon\b/.test(lower) && /\b(recall|text|phishing|scam|fake)\b/.test(lower)) return "Amazon Text Scam: Don't Click This";
+  if (/\btoll\b/.test(lower) && /\b(text|scam|fake|phishing)\b/.test(lower)) return "Toll Text Scam: Don't Click This";
+  if (/\bfake recall\b|\brecall notice\b.*\bscam\b|\bscam\b.*\brecall notice\b/.test(lower)) return "Fake Recall Notice: Don't Click This";
+  if (/\b(fake|scam|scammers?|phishing)\b.*\b(text|texts|texting)\b|\b(text|texts|texting)\b.*\b(fake|scam|scammers?|phishing)\b/.test(lower)) return "Fake Text Scam: Don't Click This";
+  if (/\b(medicare|social security)\b/.test(lower) && /\b(scam|fraud|call|text)\b/.test(lower)) return `${brand || "Medicare"} Scam Alert: Don't Answer This Call`;
+  if (/\b(home repair|contractor|roofer|repair company)\b/.test(lower) && /\b(scam|fraud|imposter)\b/.test(lower)) return "Home Repair Scams Are Exploding";
+  if (/\b(car|vehicle|auto)\b/.test(lower) && /\b(watching|tracking|recording|data|privacy|telematics)\b/.test(lower)) return "Your Car Is Watching You: Shut This Off";
+  if (/\bself[- ]checkout\b/.test(lower)) return "Self-Checkout Tricks Shoppers Need To Know";
+  if (/\b(ticket|ticketmaster|stubhub|seatgeek)\b/.test(lower) && /\b(fee|refund|hidden|junk|charge)\b/.test(lower)) return "Ticket Fees: Check This Before You Buy";
+  if (/\b(hotel|resort|booking)\b/.test(lower) && /\b(fee|hidden|junk|charge)\b/.test(lower)) return "Hotel Fees: Check This Before You Book";
+  if (/\b(delivery|doordash|uber eats|instacart)\b/.test(lower) && /\b(fee|markup|tip|price|charge)\b/.test(lower)) return "Delivery App Fees: Check This Before You Order";
+  if (/\b(streaming|netflix|disney|hulu|cable)\b/.test(lower) && /\b(price|hike|increase|bill|subscription)\b/.test(lower)) return "Streaming Bills Going Up: What To Cut Now";
+  if (/\b(grocery|food bill|supermarket)\b/.test(lower) && /\b(price|expensive|inflation|cost)\b/.test(lower)) return "Grocery Prices: Why Your Bill Still Feels Too High";
+  if (/\b(pharmacy|prescription|goodrx|cvs|walgreens)\b/.test(lower) && /\b(price|save|discount|cost)\b/.test(lower)) return "Prescription Prices: How To Pay Less";
+
+  if (brand && /\bdiscontinu(ing|ed|es)?\b/.test(lower)) return `${brand} Is Discontinuing These Items`;
+  if (brand && /\b(won'?t last|last chance|rare|limited[- ]time)\b/.test(lower)) return `${brand} Finds That Won't Last`;
+  if (brand && /\b(new at|just stocked|new launch|launch|new items?)\b/.test(lower)) return `New At ${brand}: What To Buy, What To Skip`;
+  if (brand && /\b(buy this|skip|what to buy|what to avoid)\b/.test(lower)) return `${brand}: Buy This, Not That`;
+  if (brand && /\b(sale|discount|clearance|markdown|price tag|deal)\b/.test(lower)) return `The Truth About ${brand} Deals`;
+  if (brand && /\b(employee|worker|reveal|secret|hiding|not telling)\b/.test(lower)) return `${brand} Employees Reveal What To Watch For`;
+  if (brand && /\b(caught|exposed)\b/.test(lower)) return `${brand} Got Caught: What Shoppers Should Check`;
+  if (brand && /\b(price|cost|expensive|inflation|crashed|dropped)\b/.test(lower)) return `${brand} Prices Just Changed: What To Buy`;
+  if (brand && /\b(fee|surcharge|charge|junk fee|hidden fee)\b/.test(lower)) return `${brand} Fees: What They Don't Show Up Front`;
+  if (brand && topic.id === "travel") return `${brand} Travel Deals: What To Book, What To Skip`;
+  if (brand && topic.id === "streaming") return `${brand} Bills Going Up: What To Cut Now`;
+  if (brand && topic.id === "pharmacy") return `${brand} Pharmacy Prices: How To Pay Less`;
+  if (brand && topic.id === "tickets") return `${brand} Fees: Check This Before You Buy`;
+  if (brand && /\b(return|refund|policy)\b/.test(lower)) return `${brand} Return Policy Changed: Check This`;
+  if (brand && /\b(recall|safety alert|contamination|allergy)\b/.test(lower)) return `${brand} Recall Alert: Check Your Home`;
+  if (brand && /\b(scam|phishing|fake|fraud|imposter)\b/.test(lower)) return `${brand} Scam Alert: Don't Click This`;
+  if (brand && /\b(free sample|sample|freebie|bogo)\b/.test(lower)) return `${brand} Free Samples: What They're Not Telling You`;
+  if (brand) return `${brand}: What To Buy, What To Skip`;
+
+  if (/\b(scam|phishing|fake|fraud|imposter)\b/.test(lower)) return `${lead || "Scam"}: Don't Click This`;
+  if (/\b(recall|safety alert|contamination|allergy)\b/.test(lower)) return `${lead || "Product"} Recall Alert: Check Your Home`;
+  if (/\b(fee|surcharge|charge|junk fee|hidden fee)\b/.test(lower)) return `${feeSubject(article)} Fees: Check This Before You Pay`;
+  if (/\b(return|refund|policy)\b/.test(lower)) return `${lead || "Return Policy"} Changed: Check This`;
+  if (/\b(deal|discount|freebie|bogo|clearance|markdown)\b/.test(lower)) return `${lead || "Deals"}: What To Buy, What To Skip`;
+
+  return compactHeadline(article.title || topic.theme || "Consumer Story To Check");
+}
+
+function makeOnAirHeadline(packetHeadline, topic) {
+  const lower = packetHeadline.toLowerCase();
+  if (/\bdiscontinu|won't last|last chance\b/.test(lower)) return "LAST CHANCE";
+  if (/\bbuy this|not that|skip\b/.test(lower)) return "BUY THIS, NOT THAT";
+  if (/\btruth|hiding|not telling|caught|exposed\b/.test(lower)) return "THEY'RE HIDING THIS";
+  if (/\bscam|don't click|don't answer\b/.test(lower)) return "SCAM ALERT";
+  if (/\brecall|check your home\b/.test(lower)) return "CHECK THIS RECALL";
+  if (/\bfee|charge|pay\b/.test(lower)) return "WATCH THE FEES";
+  if (/\bprice|bill|cost\b/.test(lower)) return "WHY YOU MAY PAY MORE";
+  if (/\bwatching|tracking|shut this off\b/.test(lower)) return "SHUT THIS OFF";
+  if (/\bnew at|finds|launch\b/.test(lower)) return "DON'T MISS THIS";
+  return topic.headline || "CHECK THIS";
+}
+
+function makeTheme(packetHeadline, topic, brand) {
+  if (brand) return `${brand} ${TOPIC_THEME_LABELS[topic.id] || "Story"}`;
+  return titleWords(packetHeadline, 5) || TOPIC_THEME_LABELS[topic.id] || "Consumer Alert";
+}
+
+function makeHook(article, topic, brand) {
+  const sourceTitle = cleanTitle(article.title || "");
+  if (topic.id === "scams") return `Show the exact text, email, call, fake notice, or payment request behind: ${sourceTitle}.`;
+  if (topic.id === "recalls") return `Open with the product, label, model number, or recall notice viewers can check at home: ${sourceTitle}.`;
+  if (topic.id === "fees" || topic.id === "tickets" || topic.id === "travel") return `Start on the checkout, bill, receipt, booking page, or price tag where the extra charge appears: ${sourceTitle}.`;
+  if (topic.id === "privacy" || topic.id === "cars") return `Walk viewers through the setting, dashboard, app screen, or data page tied to: ${sourceTitle}.`;
+  if (topic.id === "shopping" || topic.id === "tests") return `Put the ${brand ? `${brand} ` : ""}item, shelf tag, app deal, or side-by-side comparison on camera: ${sourceTitle}.`;
+  return `Open with the viewer-facing proof from the source: ${sourceTitle}.`;
+}
+
+function makeViewerTakeaway(topic) {
+  if (topic.id === "scams") return "Know the message, call, email, or fake notice to ignore before money or personal data is at risk.";
+  if (topic.id === "recalls") return "Check the product name, model, lot number, or recall page before using the item again.";
+  if (topic.id === "fees" || topic.id === "tickets" || topic.id === "travel") return "Compare the final total and refund rules before clicking pay.";
+  if (topic.id === "privacy" || topic.id === "cars") return "Find the setting or data-sharing page and turn off what viewers do not want tracked.";
+  if (topic.id === "shopping" || topic.id === "tests") return "Check the item, unit price, app coupon, and timing before deciding to buy or skip.";
+  if (topic.id === "pharmacy") return "Compare pharmacy cash prices, insurance prices, and discount-card prices before paying.";
+  if (topic.id === "streaming") return "Audit the plan, bundle, and renewal date, then cut or pause what no longer pays off.";
+  return "Give viewers one exact check, comparison, or action step they can use today.";
+}
+
+function sharedKeywordScore(left, right) {
+  const leftWords = new Set(titleKeywords(left));
+  return titleKeywords(right).reduce((score, word) => score + (leftWords.has(word) ? 1 : 0), 0);
+}
+
+function relatednessScore(primary, candidate, topic) {
+  let score = scoreTopic(candidate, topic) * 3;
+  const primaryBrand = detectBrand(primary);
+  const candidateBrand = detectBrand(candidate);
+  if (primaryBrand && primaryBrand === candidateBrand) score += 12;
+  score += sharedKeywordScore(primary, candidate) * 2;
+  if (candidate.source && primary.source && candidate.source === primary.source) score += 1;
+  return score;
+}
+
+function uniqueArticles(articles) {
+  const seen = new Set();
+  return articles.filter((article) => {
+    const key = article.url || `${cleanTitle(article.title || "")}-${article.source || ""}`;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function proofPointFromArticle(article) {
+  const summary = truncate(article.summary || "", 130);
+  const source = article.source || "Source";
+  const title = cleanTitle(article.title || "Story source");
+  return summary ? `${source}: ${title} - ${summary}` : `${source}: ${title}`;
+}
+
+function makeSpecificPacket(primary, topic, related, packetHeadline) {
+  const brand = detectBrand(primary);
+  const sources = uniqueArticles([primary, ...related]).slice(0, 4);
+  const headline = makeOnAirHeadline(packetHeadline, topic);
+
+  return {
+    theme: makeTheme(packetHeadline, topic, brand),
+    headline,
+    pitchHeadline: packetHeadline,
+    pitch: `${packetHeadline} turns a current source into a click-ready viewer-service story. Use the lead example, then stack related sources to show viewers exactly what to check, buy, skip, shut off, or avoid before it costs them money.`,
+    hook: makeHook(primary, topic, brand),
+    viewerTakeaway: makeViewerTakeaway(topic),
+    sourceCount: sources.length,
+    stories: sources.map((article) => ({
+      title: cleanTitle(article.title || "Untitled story"),
       summary: fallbackSummary(article),
       url: article.url,
       source: article.source,
     })),
-    proofPoints: stories.slice(0, 3).map((article) => fallbackSummary(article)),
+    proofPoints: sources.slice(0, 3).map((article) => proofPointFromArticle(article)),
     sourceQuestions: [
-      "What is the exact fee, scam, deal, policy, product, or deadline?",
-      "Who is affected and what should viewers do first?",
-      "Can the source show a receipt, screenshot, product page, recall notice, or price comparison?",
+      `What exact ${brand ? `${brand} ` : ""}item, fee, policy, message, price, or setting changed?`,
+      "Can the source show a receipt, screenshot, product page, price tag, recall notice, app screen, or text message?",
+      "Who is affected, what deadline matters, and what should viewers do first?",
     ],
-    angles: topic.angles,
+    angles: [
+      `Angle 1: The specific ${brand ? `${brand} ` : ""}${TOPIC_THEME_LABELS[topic.id]?.toLowerCase() || "consumer"} hook viewers recognize`,
+      "Angle 2: The money, safety, privacy, or time risk if they miss it",
+      "Angle 3: The exact check, comparison, setting, or question viewers should use now",
+    ],
     whyItWorks: [
-      "Built from current article search results",
-      "Multiple examples can establish a pattern",
-      "Consumer impact is visible enough for a service segment",
-      "Sources give producers a fast verification path",
+      "Concrete enough for a YouTube thumbnail and headline",
+      "Built around proof viewers can see on camera",
+      "Turns a current article into a practical save-money or avoid-risk segment",
+      "Related sources give producers a quick verification path",
     ],
     segmentStructure: [
-      "Open: Start with the clearest viewer cost, risk, or surprise",
-      "Build: Add a second article that shows this is not isolated",
-      "Escalate: Bring in the strongest safety, money, or policy detail",
-      "Turn: Explain what changed and who is responsible",
-      "Close: Give viewers the exact check, deadline, or next step",
+      "Open: Show the clearest viewer-facing proof",
+      "Build: Explain what changed and why viewers may miss it",
+      "Escalate: Add a second source or example that proves it is a pattern",
+      "Turn: Show the workaround, comparison, setting, return path, or complaint route",
+      "Close: Repeat the exact viewer action step",
     ],
     productionPlan: [
-      "Show the viewer-facing proof: screenshot, bill, receipt, product, app, or checkout page",
-      "Use one real example as the cold open",
-      "Add two source-backed comparisons or warnings",
-      "End with the exact viewer action step",
+      "Visual 1: Screenshot, bill, text, product, shelf tag, recall page, or app screen",
+      "Demo/Test: Compare the before-and-after price, setting, checkout, product, or policy",
+      "Expert/Source: Use the source article plus an agency, company page, or consumer complaint",
+      "Close: Put the viewer checklist on screen",
     ],
-  }));
+  };
+}
+
+const GENERIC_PITCH_HEADLINES = new Set([
+  "Scams Targeting Viewers",
+  "Recalls And Safety Alerts",
+  "Hidden Fees And Fine Print",
+  "Prices And Shrinkflation",
+  "Policy Changes Costing Customers",
+  "Travel Headaches And Fees",
+  "Buy It Or Skip It",
+  "Product Tests And Truth Checks",
+  "Simple Money Moves",
+  "Prescription Savings",
+  "Streaming Bills Going Up",
+  "Phone Privacy Checkup",
+  "Car Buyer Warning",
+  "Ticket Buyer Alert",
+  "Free Family Deals",
+]);
+
+function isGenericPitchHeadline(headline) {
+  if (!headline) return true;
+  if (GENERIC_PITCH_HEADLINES.has(headline)) return true;
+  const lower = headline.toLowerCase();
+  return /^(scams|recalls|hidden fees|prices|fees|deals|alerts?|savings?|tips?)\s*(targeting|and|for|to|in|on)?\s*(viewers?|consumers?|shoppers?|customers?)?$/i.test(lower);
+}
+
+function normalizeAISegment(segment, articles) {
+  if (!isGenericPitchHeadline(segment.pitchHeadline)) return segment;
+
+  const topic = FALLBACK_TOPICS.find((t) => t.id === "shopping") || FALLBACK_TOPICS[0];
+  const bestArticle = articles
+    .map((article) => {
+      const t = bestTopicForArticle(article);
+      return { article, topic: t, score: articleSpecificityScore(article, t) };
+    })
+    .sort((a, b) => b.score - a.score)[0];
+
+  if (!bestArticle) return segment;
+
+  const packetHeadline = makeRossenPitchHeadline(bestArticle.article, bestArticle.topic);
+  if (isGenericPitchHeadline(packetHeadline)) return segment;
+
+  const brand = detectBrand(bestArticle.article);
+  return {
+    ...segment,
+    pitchHeadline: packetHeadline,
+    theme: makeTheme(packetHeadline, bestArticle.topic, brand),
+    headline: makeOnAirHeadline(packetHeadline, bestArticle.topic),
+  };
+}
+
+function normalizeAISegments(segments, articles) {
+  if (!Array.isArray(segments)) return segments;
+  const usedHeadlines = new Set();
+  return segments.map((segment) => {
+    const normalized = normalizeAISegment(segment, articles);
+    if (usedHeadlines.has(normalized.pitchHeadline)) return segment;
+    usedHeadlines.add(normalized.pitchHeadline);
+    return normalized;
+  });
+}
+
+function buildFallbackSegments(mode, query, articles) {
+  const targetCount = mode === "search" || mode === "bundle" ? 3 : 4;
+  const ranked = articles
+    .map((article, index) => {
+      const topic = bestTopicForArticle(article);
+      return { article, index, score: articleSpecificityScore(article, topic), topic };
+    })
+    .filter(({ article, score }) => cleanTitle(article.title || "").length > 8 && score > -6)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const selected = [];
+  const used = new Set();
+
+  for (const candidate of ranked) {
+    if (selected.length >= targetCount) break;
+
+    const packetHeadline = makeRossenPitchHeadline(candidate.article, candidate.topic);
+    const brand = detectBrand(candidate.article);
+    const fingerprint = titleFingerprint(packetHeadline);
+    const key = brand ? `${brand.toLowerCase()}-${candidate.topic.id}` : fingerprint;
+
+    if (!fingerprint || used.has(key) || used.has(fingerprint)) continue;
+
+    const related = ranked
+      .filter((other) => other.article !== candidate.article)
+      .map((other) => ({ ...other, relatedScore: relatednessScore(candidate.article, other.article, candidate.topic) }))
+      .filter((other) => other.relatedScore > 0)
+      .sort((left, right) => right.relatedScore - left.relatedScore || right.score - left.score)
+      .map((other) => other.article);
+
+    selected.push(makeSpecificPacket(candidate.article, candidate.topic, related, packetHeadline));
+    used.add(key);
+    used.add(fingerprint);
+  }
+
+  if (selected.length === 0 && articles.length > 0) {
+    const topic = query
+      ? {
+          id: "shopping",
+          theme: `Consumer Angle: ${truncate(query, 42)}`,
+          headline: "CHECK THIS",
+          angles: [],
+          patterns: [],
+        }
+      : bestTopicForArticle(articles[0]);
+    selected.push(makeSpecificPacket(articles[0], topic, articles.slice(1), makeRossenPitchHeadline(articles[0], topic)));
+  }
+
+  return selected;
 }
 
 async function searchNews(queries, env) {
@@ -585,10 +1016,10 @@ function buildPrompt(mode, query, articles) {
     .join("\n\n---\n\n");
 
   const instructions = {
-    discover: `Find 3–4 strong Rossen-style consumer video bundles from the articles below. Each bundle should be a theme strong enough for a 10-minute segment, with a strong hook, a visible demo or proof point, and an immediate viewer takeaway.\n\n${ROSSEN_STORY_RULES}`,
-    search: `Research this story idea: "${query}". Build 2–3 complete story packets with supporting sources, proof points, viewer takeaways, and production angles.`,
-    bundle: `The producer wants to build a fuller packet around: "${query}". Find 4–6 related source stories that fit together, then package them into one or more complete story packets.`,
-    inspire: `Generate 3–4 Jeff Rossen-style consumer story ideas inspired by these articles. Each should feel like something Rossen would actually investigate and present on TV.\n\n${ROSSEN_STORY_RULES}`,
+    discover: `Find 3–4 strong Rossen-style consumer video packets from the articles below. Each packet must be specific enough to click: name the store, product, service, scam, fee, recall, setting, policy, or deal in the pitchHeadline.\n\n${ROSSEN_STORY_RULES}`,
+    search: `Research this story idea: "${query}". Build 2–3 complete story packets with supporting sources, proof points, viewer takeaways, and production angles. Make the packets concrete and clickable, not broad category labels.`,
+    bundle: `The producer wants to build a fuller packet around: "${query}". Find 4–6 related source stories that fit together, then package them into one or more complete story packets. Keep the headline anchored to the exact store, product, fee, scam, policy, or viewer action.`,
+    inspire: `Generate 3–4 Jeff Rossen-style consumer story ideas inspired by these articles. Each should feel like something Rossen would actually investigate and present on TV, with a headline like a specific YouTube story rather than a category.\n\n${ROSSEN_STORY_RULES}`,
   };
 
   const system = `You are a segment producer for Jeff Rossen's consumer video show. You specialize in finding viewer-service stories that help everyday Americans save money, avoid scams, buy smarter, get refunds, and protect their families. Your job is to package individual stories into compelling 10-minute video segments with a fast hook, visible proof, and practical takeaways.`;
@@ -598,12 +1029,14 @@ function buildPrompt(mode, query, articles) {
 ARTICLES:
 ${articleText}
 
+Important: do not use broad category names as pitchHeadline. Bad pitchHeadlines: "Scams Targeting Viewers", "Recalls And Safety Alerts", "Hidden Fees And Fine Print", "Prices And Shrinkflation". Good pitchHeadlines: "Amazon Text Scam: Don't Click This", "The Truth About Kohl's Deals", "Hotel Fees: Check This Before You Book", "Your Car Is Watching You: Shut This Off".
+
 Return a JSON array of story packets. Each object must use EXACTLY this structure:
 [
   {
-    "theme": "Story lane, 3–6 words",
+    "theme": "Specific story lane, 3–6 words",
     "headline": "ON-AIR HEADLINE ALL CAPS UNDER 10 WORDS",
-    "pitchHeadline": "Clickable story-packet headline, Rossen-style and producer-friendly",
+    "pitchHeadline": "Clickable Rossen-style headline naming the store/product/service/scam/fee/recall/setting/action",
     "pitch": "2-sentence pitch explaining the story, why Jeff would care, and why viewers would click",
     "hook": "The cold-open moment: bill, text, app screen, product, price tag, recall notice, test, or viewer example",
     "viewerTakeaway": "One clear thing viewers can do after watching",
@@ -807,7 +1240,10 @@ export default async function handler(req, res) {
 
     let segments;
     try {
-      segments = await callAI(buildPrompt(mode, query, articlesForAI), process.env);
+      segments = normalizeAISegments(
+        await callAI(buildPrompt(mode, query, articlesForAI), process.env),
+        articles,
+      );
     } catch (error) {
       console.warn(`[segments] AI unavailable, using fallback: ${error.message}`);
       send({ type: "progress", message: "AI unavailable; building article-based story packets…", percent: 75 });

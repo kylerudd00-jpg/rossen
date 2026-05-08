@@ -115,7 +115,8 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
     loadImage("/rossen-reports.png"),
   ]);
 
-  if (bgResult.status === "fulfilled") drawCoverImage(ctx, bgResult.value, width, height, post.crop);
+  const bgLoaded = bgResult.status === "fulfilled";
+  if (bgLoaded) drawCoverImage(ctx, bgResult.value, width, height, post.crop);
 
   const grad = ctx.createLinearGradient(0, 0, 0, height);
   grad.addColorStop(0,    "rgba(0,0,0,0.04)");
@@ -127,7 +128,7 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
   ctx.fillRect(0, 0, width, height);
 
   const lines = (post.headline || "").split("\n").filter(Boolean).slice(0, 3);
-  if (lines.length === 0) return canvas;
+  if (lines.length === 0) return { canvas, bgLoaded };
 
   const FONT = "Anton, Impact, Arial Black, sans-serif";
   const maxTextW = width * 0.86;
@@ -191,7 +192,7 @@ async function renderPost(post, { width = 1080, height = 1350 } = {}) {
     ctx.fillText(line, cx, y);
   });
 
-  return canvas;
+  return { canvas, bgLoaded };
 }
 
 // ─── PostCard ─────────────────────────────────────────────────────────────────
@@ -202,9 +203,13 @@ function PostCard({ post }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [rendering, setRendering] = useState(true);
   const renderIdRef = useRef(0);
+  const failedImagesRef = useRef(new Set());
   const [editableHeadline, setEditableHeadline] = useState(post.headline || "");
   const [editingHeadline, setEditingHeadline] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [caption, setCaption] = useState(null);
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [captionCopied, setCaptionCopied] = useState(false);
 
   const candidates = post.imageCandidates || [];
   const activeImage = candidates[imageIdx] || post.imageUrl || null;
@@ -231,12 +236,19 @@ function PostCard({ post }) {
 
   useEffect(() => {
     const id = ++renderIdRef.current;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRendering(true);
     const dpr = window.devicePixelRatio || 2;
     renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline, crop: { x: cropX, y: cropY, zoom: cropZoom } }, { width: 540 * dpr, height: 675 * dpr })
-      .then((canvas) => {
+      .then(({ canvas, bgLoaded }) => {
         if (renderIdRef.current !== id) return;
+        if (!bgLoaded && activeImage && candidates.length > 1) {
+          failedImagesRef.current.add(activeImage);
+          const nextIdx = candidates.findIndex((url, i) => i !== imageIdx && !failedImagesRef.current.has(url));
+          if (nextIdx !== -1) {
+            setImageIdx(nextIdx);
+            return;
+          }
+        }
         setPreviewUrl(canvas.toDataURL("image/png"));
         setRendering(false);
       })
@@ -245,10 +257,10 @@ function PostCard({ post }) {
         setPreviewUrl(null);
         setRendering(false);
       });
-  }, [post, activeImage, editableHeadline, cropX, cropY, cropZoom]);
+  }, [post, activeImage, editableHeadline, cropX, cropY, cropZoom, imageIdx, candidates]);
 
   async function handleDownload() {
-    const canvas = await renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline, crop: activeCrop }, { width: 1080, height: 1350 });
+    const { canvas } = await renderPost({ ...post, imageUrl: activeImage, headline: editableHeadline, crop: activeCrop }, { width: 1080, height: 1350 });
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -261,7 +273,7 @@ function PostCard({ post }) {
   }
 
   async function handleCopy() {
-    const canvas = await renderPost(
+    const { canvas } = await renderPost(
       { ...post, imageUrl: activeImage, headline: editableHeadline, crop: activeCrop },
       { width: 1080, height: 1350 }
     );
@@ -280,6 +292,32 @@ function PostCard({ post }) {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
     }, "image/png");
+  }
+
+  async function handleGenerateCaption() {
+    setCaptionLoading(true);
+    try {
+      const r = await fetch("/api/caption", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ brand: post.brand, headline: editableHeadline, summary: post.summary || "" }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.caption) setCaption(data.caption);
+      }
+    } finally {
+      setCaptionLoading(false);
+    }
+  }
+
+  async function handleCopyCaption() {
+    if (!caption) return;
+    try {
+      await navigator.clipboard.writeText(caption);
+      setCaptionCopied(true);
+      setTimeout(() => setCaptionCopied(false), 2000);
+    } catch {}
   }
 
   const headlineLines = (editableHeadline || "").split("\n").filter(Boolean);
@@ -360,6 +398,30 @@ function PostCard({ post }) {
         <div className="post-actions">
           <button className={`btn-copy ${copied ? "btn-copy--copied" : ""}`} onClick={handleCopy}>{copied ? "✓ Copied!" : "Copy"}</button>
           <button className="btn-download" onClick={handleDownload}>↓ Save</button>
+        </div>
+
+        <div className="post-caption">
+          {!caption && (
+            <button className="btn-caption" onClick={handleGenerateCaption} disabled={captionLoading}>
+              {captionLoading ? <><span className="regen-spinner" /> Generating caption…</> : "Generate Caption"}
+            </button>
+          )}
+          {caption && (
+            <div className="caption-result">
+              <div className="caption-text">{caption}</div>
+              <div className="caption-footer">
+                <button
+                  className={`btn-caption-copy ${captionCopied ? "btn-caption-copy--copied" : ""}`}
+                  onClick={handleCopyCaption}
+                >
+                  {captionCopied ? "✓ Copied!" : "Copy Caption"}
+                </button>
+                <button className="btn-caption-regen" onClick={handleGenerateCaption} disabled={captionLoading}>
+                  ↻
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -603,6 +665,41 @@ export default function App() {
     setPhase("done");
   }
 
+  async function makePostFromPacket(packet) {
+    if (phase === "loading" || phase === "generating") return;
+    const headline = packet.pitchHeadline || packet.headline || packet.theme || "";
+    if (!headline) return;
+    const brand = headline.split("\n")[0].trim();
+
+    setActiveTab("instagram");
+    setPhase("generating");
+    setGenProgress({ current: 1, total: 1, label: brand });
+
+    let candidates = [];
+    try {
+      const params = new URLSearchParams({
+        q: brand,
+        headline,
+        title: packet.pitch || "",
+        summary: packet.pitch || "",
+        sourceUrl: packet.stories?.[0]?.url || "",
+      });
+      const res = await fetch(`/api/images?${params}`);
+      if (res.ok) candidates = await res.json();
+    } catch { /* dark background fallback */ }
+
+    const newPost = {
+      id: `packet-${Date.now()}`,
+      brand,
+      headline,
+      summary: packet.pitch || "",
+      imageUrl: candidates[0] || null,
+      imageCandidates: candidates,
+    };
+    setPosts([newPost]);
+    setPhase("done");
+  }
+
   function reset() {
     setPhase("idle");
     setStories([]);
@@ -654,6 +751,8 @@ export default function App() {
             Story Research
           </button>
         </nav>
+        {/* desktop right — hidden on mobile */}
+
         <div className="header-right">
           {activeTab === "instagram" && lastFetched && (
             <div className="header-status">
@@ -674,10 +773,28 @@ export default function App() {
         </div>
       </header>
 
+      {/* ── Mobile bottom nav ── */}
+      <nav className="bottom-nav" aria-label="App sections">
+        <button
+          className={`bottom-nav-btn${activeTab === "instagram" ? " bottom-nav-btn--active" : ""}`}
+          onClick={() => setActiveTab("instagram")}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+          <span>Posts</span>
+        </button>
+        <button
+          className={`bottom-nav-btn${activeTab === "research" ? " bottom-nav-btn--active" : ""}`}
+          onClick={() => setActiveTab("research")}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <span>Research</span>
+        </button>
+      </nav>
+
       {/* ── Story Research Tab ── */}
       {activeTab === "research" && (
         <main className="app-main app-main--research">
-          <StoryResearch />
+          <StoryResearch onMakePost={makePostFromPacket} />
         </main>
       )}
 

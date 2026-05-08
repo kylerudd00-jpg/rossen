@@ -1,20 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const MODES = [
   {
     id: "discover",
-    label: "Discover Stories",
-    desc: "Find Rossen-style video stories bubbling up now",
+    label: "What's Hot Now",
+    desc: "Stories breaking right now",
   },
   {
     id: "search",
-    label: "Search by Headline",
-    desc: "Enter a rough story idea to research",
+    label: "Search a Topic",
+    desc: "Type any idea to research it",
   },
   {
     id: "inspire",
-    label: "Rossen Inspiration",
-    desc: "Generate ideas from past Rossen episode themes",
+    label: "Classic Angles",
+    desc: "Ideas from past Rossen episodes",
   },
 ];
 
@@ -22,112 +22,83 @@ function asList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
-function StoryPacketCard({ packet, index, onBundle }) {
-  const [expanded, setExpanded] = useState(false);
+function StoryPacketCard({ packet, index, onBundle, onMakePost }) {
+  const [showMore, setShowMore] = useState(false);
   const sources = asList(packet.stories);
   const proofPoints = asList(packet.proofPoints);
-  const sourceQuestions = asList(packet.sourceQuestions);
   const angles = asList(packet.angles);
-  const whyItWorks = asList(packet.whyItWorks);
   const productionPlan = asList(packet.productionPlan).length > 0
     ? asList(packet.productionPlan)
     : asList(packet.segmentStructure);
   const pitchHeadline = packet.pitchHeadline || packet.headline || packet.theme || "Story Packet";
-  const pitch = packet.pitch || sources[0]?.summary || "A Rossen-style consumer story packet with source material and production angles.";
+  const pitch = packet.pitch || sources[0]?.summary || "A Rossen-style consumer story.";
   const hook = packet.hook || sources[0]?.title || "Start with the clearest viewer-facing proof.";
   const viewerTakeaway = packet.viewerTakeaway || angles[2] || "Give viewers one clear action step.";
   const sourceCount = Number(packet.sourceCount || sources.length || 0);
 
   return (
-    <article className={`packet-card${expanded ? " packet-card--open" : ""}`}>
-      <button
-        type="button"
-        className="packet-summary"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <span className="packet-kicker">Story Packet {index + 1}</span>
-        {packet.theme && <span className="packet-theme">{packet.theme}</span>}
-        <span className="packet-title">{pitchHeadline}</span>
-        <span className="packet-pitch">{pitch}</span>
-        <span className="packet-meta">
-          <span>{sourceCount} sources</span>
-          <span>{packet.headline || "Pitch ready"}</span>
-          <span>{expanded ? "Close packet" : "Open packet"}</span>
-        </span>
-      </button>
+    <article className="packet-card packet-card--flat">
+      {/* Always-visible content */}
+      <div className="packet-flat-head">
+        <span className="packet-kicker">Story {index + 1}</span>
+        <h3 className="packet-flat-title">{pitchHeadline}</h3>
+        <p className="packet-flat-pitch">{pitch}</p>
 
-      {expanded && (
-        <div className="packet-body">
-          <div className="packet-frame">
-            <div className="packet-frame-item">
-              <div className="packet-section-label">Cold Open</div>
-              <p>{hook}</p>
-            </div>
-            <div className="packet-frame-item">
-              <div className="packet-section-label">Viewer Takeaway</div>
-              <p>{viewerTakeaway}</p>
-            </div>
+        <div className="packet-flat-hook">
+          <span className="packet-flat-label">Cold open</span>
+          <span>{hook}</span>
+        </div>
+
+        <div className="packet-flat-takeaway">
+          <span className="packet-flat-label">Viewer walks away knowing</span>
+          <span>{viewerTakeaway}</span>
+        </div>
+
+        {sources.length > 0 && (
+          <div className="packet-flat-sources">
+            {sources.map((s, i) => (
+              s.url
+                ? <a key={i} href={s.url} target="_blank" rel="noreferrer" className="packet-flat-source-link">{s.source || s.title} ↗</a>
+                : <span key={i} className="packet-flat-source-link">{s.title}</span>
+            ))}
           </div>
+        )}
+      </div>
 
-          {sources.length > 0 && (
-            <section className="packet-section">
-              <div className="packet-section-label">Sources</div>
-              <div className="packet-sources">
-                {sources.map((source, i) => (
-                  <div key={`${source.url || source.title || "source"}-${i}`} className="packet-source">
-                    <div className="packet-source-title">{source.title}</div>
-                    {source.summary && <p>{source.summary}</p>}
-                    {source.url && (
-                      <a href={source.url} target="_blank" rel="noreferrer">
-                        {source.source || "Open source"} ↗
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+      {/* More details toggle */}
+      {(angles.length > 0 || proofPoints.length > 0 || productionPlan.length > 0) && (
+        <button
+          type="button"
+          className="packet-more-toggle"
+          onClick={() => setShowMore((v) => !v)}
+        >
+          {showMore ? "Hide details ↑" : "More details ↓"}
+        </button>
+      )}
 
-          {proofPoints.length > 0 && (
-            <section className="packet-section">
-              <div className="packet-section-label">Proof Points</div>
-              <ul className="packet-list">
-                {proofPoints.map((point, i) => <li key={i}>{point}</li>)}
-              </ul>
-            </section>
-          )}
-
-          {sourceQuestions.length > 0 && (
-            <section className="packet-section">
-              <div className="packet-section-label">Before Producing</div>
-              <ul className="packet-list">
-                {sourceQuestions.map((question, i) => <li key={i}>{question}</li>)}
-              </ul>
-            </section>
-          )}
-
-          {whyItWorks.length > 0 && (
-            <section className="packet-section">
-              <div className="packet-section-label">Why It Works</div>
-              <ul className="packet-list">
-                {whyItWorks.map((reason, i) => <li key={i}>{reason}</li>)}
-              </ul>
-            </section>
-          )}
-
+      {showMore && (
+        <div className="packet-body">
           {angles.length > 0 && (
             <section className="packet-section">
-              <div className="packet-section-label">Angles</div>
+              <div className="packet-section-label">Story angles</div>
               <ol className="packet-list">
                 {angles.map((angle, i) => <li key={i}>{angle}</li>)}
               </ol>
             </section>
           )}
 
+          {proofPoints.length > 0 && (
+            <section className="packet-section">
+              <div className="packet-section-label">Proof points</div>
+              <ul className="packet-list">
+                {proofPoints.map((point, i) => <li key={i}>{point}</li>)}
+              </ul>
+            </section>
+          )}
+
           {productionPlan.length > 0 && (
             <section className="packet-section">
-              <div className="packet-section-label">Production Plan</div>
+              <div className="packet-section-label">How to film it</div>
               <ol className="packet-list">
                 {productionPlan.map((step, i) => <li key={i}>{step}</li>)}
               </ol>
@@ -136,21 +107,32 @@ function StoryPacketCard({ packet, index, onBundle }) {
         </div>
       )}
 
-      <button
-        type="button"
-        className="packet-related-btn"
-        onClick={() => onBundle(packet.pitchHeadline || packet.theme || packet.headline)}
-      >
-        Build Related Packet →
-      </button>
+      <div className="packet-actions">
+        <button
+          type="button"
+          className="packet-related-btn"
+          onClick={() => onBundle(packet.pitchHeadline || packet.theme || packet.headline)}
+        >
+          Build Related Packet →
+        </button>
+        {onMakePost && (
+          <button
+            type="button"
+            className="packet-make-post-btn"
+            onClick={() => onMakePost(packet)}
+          >
+            Make Post →
+          </button>
+        )}
+      </div>
     </article>
   );
 }
 
-export default function StoryResearch() {
+export default function StoryResearch({ onMakePost }) {
   const [mode, setMode] = useState("discover");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("idle"); // idle | loading | done | error
+  const [status, setStatus] = useState("idle");
   const [progress, setProgress] = useState({ message: "", percent: 0 });
   const [packets, setPackets] = useState([]);
   const [error, setError] = useState(null);
@@ -225,19 +207,37 @@ export default function StoryResearch() {
         throw new Error("Story packet search ended before results were returned. Try again.");
       }
     } catch (e) {
-      setError(e.name === "AbortError" ? "Story packet search timed out. Try again." : e.message);
+      setError(e.name === "AbortError" ? "Search timed out. Try again." : e.message);
       setStatus("error");
     } finally {
       window.clearTimeout(timeoutId);
     }
   }
 
+  // Auto-run discover on first load
+  useEffect(() => {
+    runSearch("discover", "");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleBundle(theme) {
-    setMode("bundle");
+    setMode("search");
     setQuery(theme);
     runSearch("bundle", theme);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  function handleModeChange(newMode) {
+    setMode(newMode);
+    setPackets([]);
+    setStatus("idle");
+    setError(null);
+    setQuery("");
+    if (newMode === "discover" || newMode === "inspire") {
+      runSearch(newMode, "");
+    }
+  }
+
+  const isLoading = status === "loading";
 
   return (
     <div className="research-panel">
@@ -248,12 +248,8 @@ export default function StoryResearch() {
           <button
             key={m.id}
             className={`research-mode-btn${mode === m.id ? " research-mode-btn--active" : ""}`}
-            onClick={() => {
-              setMode(m.id);
-              setPackets([]);
-              setStatus("idle");
-              setError(null);
-            }}
+            onClick={() => handleModeChange(m.id)}
+            disabled={isLoading}
           >
             <span className="rm-label">{m.label}</span>
             <span className="rm-desc">{m.desc}</span>
@@ -261,17 +257,13 @@ export default function StoryResearch() {
         ))}
       </div>
 
-      {/* Search input (search + bundle modes) */}
-      {(mode === "search" || mode === "bundle") && (
+      {/* Search input */}
+      {mode === "search" && (
         <div className="research-input-row">
           <input
             className="research-input"
             type="text"
-            placeholder={
-              mode === "search"
-                ? "Enter a headline or rough story idea…"
-                : "Story or theme to bundle…"
-            }
+            placeholder="Enter a headline or rough story idea…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && runSearch()}
@@ -279,32 +271,15 @@ export default function StoryResearch() {
           <button
             className="research-go-btn"
             onClick={() => runSearch()}
-            disabled={status === "loading" || !query.trim()}
+            disabled={isLoading || !query.trim()}
           >
-            {status === "loading" ? "Searching…" : "Search →"}
-          </button>
-        </div>
-      )}
-
-      {/* Discover / Inspire run button */}
-      {(mode === "discover" || mode === "inspire") && (
-        <div className="research-run-row">
-          <button
-            className="research-go-btn research-go-btn--full"
-            onClick={() => runSearch()}
-            disabled={status === "loading"}
-          >
-            {status === "loading"
-              ? "Searching…"
-              : mode === "discover"
-              ? "Generate Story Packets →"
-              : "Generate Packet Ideas →"}
+            {isLoading ? "Searching…" : "Search →"}
           </button>
         </div>
       )}
 
       {/* Loading state */}
-      {status === "loading" && (
+      {isLoading && (
         <div className="research-loading">
           <div className="research-progress-track">
             <div className="research-progress-fill" style={{ width: `${progress.percent}%` }} />
@@ -315,18 +290,30 @@ export default function StoryResearch() {
 
       {/* Error state */}
       {status === "error" && (
-        <div className="research-error">{error}</div>
+        <div className="research-error">
+          {error}
+          <button className="research-retry-btn" onClick={() => runSearch()}>Try again →</button>
+        </div>
       )}
 
-      {/* Results */}
+      {/* Results header with refresh */}
+      {status === "done" && packets.length > 0 && (
+        <div className="research-results-header">
+          <span>{packets.length} stories found</span>
+          <button className="research-refresh-btn" onClick={() => runSearch()} disabled={isLoading}>
+            Refresh ↻
+          </button>
+        </div>
+      )}
+
       {status === "done" && packets.length === 0 && (
-        <div className="research-empty">No story packets found. Try a different query or mode.</div>
+        <div className="research-empty">No story packets found. Try a different topic.</div>
       )}
 
       {packets.length > 0 && (
         <div className="packet-grid">
           {packets.map((packet, i) => (
-            <StoryPacketCard key={i} packet={packet} index={i} onBundle={handleBundle} />
+            <StoryPacketCard key={i} packet={packet} index={i} onBundle={handleBundle} onMakePost={onMakePost} />
           ))}
         </div>
       )}

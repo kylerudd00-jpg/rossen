@@ -13,16 +13,27 @@ export default async function handler(req, res) {
 
   try {
     const keys = { geminiKey: process.env.GEMINI_API_KEY, groqKey: process.env.GROQ_API_KEY };
-    let query = imageQuery.trim() || null;
-    if (!query && (keys.geminiKey || keys.groqKey) && headline) {
-      query = await gemini(
-        "Write a 5-8 word Google Images query for the best real photograph for this consumer story. If it is a restaurant/store/theater deal, search for a real storefront, exterior, drive-thru, entrance, marquee, or building sign photo. If it is a recall/safety warning about a physical product, search for the exact product/package photo. Do not search for logos, menus, coupons, screenshots, social posts, or generic brand images. Return only the query.",
+    let aiQueries = imageQuery.trim() ? [imageQuery.trim()] : [];
+    if (aiQueries.length === 0 && (keys.geminiKey || keys.groqKey) && headline) {
+      const raw = await gemini(
+        `You are picking background photos for a Jeff Rossen consumer news Instagram post.
+Write exactly 2 image search queries — one per line, no numbering, no explanation.
+Query 1: a vivid real-world photo that matches the story setting (storefront exterior, drive-thru lane, store aisle, product on shelf, or building entrance).
+Query 2: a close-up or alternate angle of the same subject.
+Rules:
+- Name the exact brand or product in each query
+- Prefer "exterior", "storefront", "store front", "entrance", "aisle", "product photo"
+- Avoid logo, icon, menu, coupon, screenshot, cartoon, vector
+- 5-9 words each query`,
         `Brand: ${brand}\nHeadline: ${headline}\nTitle: ${title}\nSummary: ${summary}`,
         keys,
-        { maxTokens: 32 },
+        { maxTokens: 48 },
       ).catch(() => null);
+      if (raw) {
+        aiQueries = raw.split(/\n+/).map((q) => q.replace(/^\d+[.)]\s*/, "").trim()).filter(Boolean).slice(0, 2);
+      }
     }
-    const images = await searchImagesForBrand(brand, process.env, { aiQuery: query, headline, title, summary, sourceUrl });
+    const images = await searchImagesForBrand(brand, process.env, { aiQuery: aiQueries[0] || null, aiQuery2: aiQueries[1] || null, headline, title, summary, sourceUrl });
     res.status(200).json(images);
   } catch (e) {
     res.status(500).json({ error: e.message });
