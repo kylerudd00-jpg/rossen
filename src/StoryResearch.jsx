@@ -166,41 +166,69 @@ export default function StoryResearch() {
     setPackets([]);
     setProgress({ message: "Starting…", percent: 0 });
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 70000);
+
     try {
       const res = await fetch("/api/segments", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ mode: activeMode, query: activeQuery }),
       });
 
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      if (!res.body) throw new Error("No response stream returned");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let completed = false;
+
+      function handleEvent(event) {
+        if (event.type === "progress") {
+          setProgress({ message: event.message, percent: event.percent });
+        } else if (event.type === "done") {
+          completed = true;
+          setPackets(event.segments || []);
+          setStatus("done");
+        } else if (event.type === "error") {
+          completed = true;
+          throw new Error(event.message);
+        }
+      }
+
+      function processBuffer(flush = false) {
+        const events = buffer.split("\n\n");
+        buffer = flush ? "" : events.pop();
+        for (const rawEvent of events) {
+          const dataLines = rawEvent
+            .split("\n")
+            .filter((line) => line.startsWith("data: "))
+            .map((line) => line.slice(6));
+          if (dataLines.length === 0) continue;
+          handleEvent(JSON.parse(dataLines.join("\n")));
+        }
+      }
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress") {
-            setProgress({ message: event.message, percent: event.percent });
-          } else if (event.type === "done") {
-            setPackets(event.segments || []);
-            setStatus("done");
-          } else if (event.type === "error") {
-            throw new Error(event.message);
-          }
-        }
+        processBuffer();
+      }
+
+      buffer += decoder.decode();
+      processBuffer(true);
+
+      if (!completed) {
+        throw new Error("Story packet search ended before results were returned. Try again.");
       }
     } catch (e) {
-      setError(e.message);
+      setError(e.name === "AbortError" ? "Story packet search timed out. Try again." : e.message);
       setStatus("error");
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 

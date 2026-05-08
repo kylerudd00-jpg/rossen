@@ -128,6 +128,8 @@ Pattern rules:
 
 const AI_ARTICLE_LIMIT = 18;
 const AI_SUMMARY_LIMIT = 360;
+const AI_TIMEOUT_MS = 18000;
+const SEARCH_CONCURRENCY = 6;
 
 const FALLBACK_TOPICS = [
   {
@@ -389,6 +391,23 @@ async function searchGoogleNews(query, env) {
   }));
 }
 
+async function runWithConcurrency(items, limit, task) {
+  const results = [];
+  let index = 0;
+
+  async function worker() {
+    while (index < items.length) {
+      const current = items[index];
+      index += 1;
+      results.push(await task(current));
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 function dedupeArticles(articles) {
   const seen = new Set();
   return articles.filter((a) => {
@@ -547,13 +566,13 @@ async function searchNews(queries, env) {
 
   if (articles.length === 0) {
     usedFallback = true;
-    for (const q of queries) {
+    await runWithConcurrency(queries, SEARCH_CONCURRENCY, async (q) => {
       try {
         all.push(...await searchGoogleNews(q, env));
       } catch (error) {
         errors.push(error.message);
       }
-    }
+    });
     articles = dedupeArticles(all);
   }
 
@@ -662,7 +681,7 @@ async function callAI({ system, user }, env) {
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS),
         body: JSON.stringify({
           model: "gpt-4o",
           messages: [{ role: "system", content: system }, { role: "user", content: user }],
@@ -683,7 +702,7 @@ async function callAI({ system, user }, env) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS),
         body: JSON.stringify({
           model: "claude-opus-4-7",
           max_tokens: 4000,
@@ -706,7 +725,7 @@ async function callAI({ system, user }, env) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(45000),
+          signal: AbortSignal.timeout(AI_TIMEOUT_MS),
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ role: "user", parts: [{ text: user }] }],
@@ -728,7 +747,7 @@ async function callAI({ system, user }, env) {
       const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.GROQ_API_KEY}` },
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS),
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
           messages: [{ role: "system", content: system }, { role: "user", content: user }],
@@ -784,6 +803,7 @@ export default async function handler(req, res) {
     const articlesForAI = articles.slice(0, AI_ARTICLE_LIMIT);
 
     send({ type: "progress", message: `Analyzing ${articlesForAI.length} articles for story packets…`, percent: 55 });
+    send({ type: "progress", message: "Drafting headline pitches and source packets…", percent: 65 });
 
     let segments;
     try {
