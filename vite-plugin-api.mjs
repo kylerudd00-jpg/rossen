@@ -4,6 +4,7 @@ import { fetchStories, writeHeadline } from "./pipeline/lib/storyPipeline.mjs";
 import { searchImagesForBrand } from "./pipeline/lib/imageSearch.mjs";
 import { gemini } from "./pipeline/lib/gemini.mjs";
 import { writeOpenAIHeadline } from "./pipeline/lib/openaiResearch.mjs";
+import segmentsHandler from "./api/segments.js";
 
 // Vite doesn't push .env into process.env for plugins — load it manually
 function loadDotEnv() {
@@ -44,6 +45,23 @@ export function apiPlugin() {
             send({ type: "error", message: e.message });
           }
           res.end();
+          return;
+        }
+
+        if (url.pathname === "/api/segments") {
+          try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const raw = Buffer.concat(chunks).toString();
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch (e) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: e.message }));
+            return;
+          }
+
+          await segmentsHandler(req, res);
           return;
         }
 

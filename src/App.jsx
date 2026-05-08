@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
+import StoryResearch from "./StoryResearch.jsx";
 
 const SEARCH_SOURCES = [
   "Brave Search", "Tavily", "Google News", "Hip2Save", "Slickdeals",
@@ -535,6 +536,7 @@ function PasswordGate({ children }) {
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState("instagram");
   const [phase, setPhase] = useState("idle");
   const [stories, setStories] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -676,14 +678,28 @@ export default function App() {
             <img src="/rossen-reports.png" alt="Rossen Reports" className="header-logo" />
           </button>
         </div>
+        <nav className="header-tabs" aria-label="App sections">
+          <button
+            className={`header-tab${activeTab === "instagram" ? " header-tab--active" : ""}`}
+            onClick={() => setActiveTab("instagram")}
+          >
+            Instagram Posts
+          </button>
+          <button
+            className={`header-tab${activeTab === "research" ? " header-tab--active" : ""}`}
+            onClick={() => setActiveTab("research")}
+          >
+            Story Research
+          </button>
+        </nav>
         <div className="header-right">
-          {lastFetched && (
+          {activeTab === "instagram" && lastFetched && (
             <div className="header-status">
               <span className="status-dot" />
               Last refreshed {formatTimeAgo(lastFetched)}
             </div>
           )}
-          {(phase === "selecting" || phase === "done") && (
+          {activeTab === "instagram" && (phase === "selecting" || phase === "done") && (
             <button
               className="btn-fetch-header"
               onClick={() => fetchStories({ force: true })}
@@ -696,7 +712,15 @@ export default function App() {
         </div>
       </header>
 
-      <main className="app-main">
+      {/* ── Story Research Tab ── */}
+      {activeTab === "research" && (
+        <main className="app-main app-main--research">
+          <StoryResearch />
+        </main>
+      )}
+
+      {/* ── Instagram Posts Tab ── */}
+      <main className="app-main" style={{ display: activeTab === "instagram" ? undefined : "none" }}>
 
         {/* ── IDLE ── */}
         {phase === "idle" && (

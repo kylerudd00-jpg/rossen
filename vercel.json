@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/stories.js": { "maxDuration": 60 },
+    "api/segments.js": { "maxDuration": 60 },
     "api/images.js": { "maxDuration": 15 }
   }
 }
