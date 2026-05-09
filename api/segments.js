@@ -886,7 +886,6 @@ function isGenericPitchHeadline(headline) {
 function normalizeAISegment(segment, articles) {
   if (!isGenericPitchHeadline(segment.pitchHeadline)) return segment;
 
-  const topic = FALLBACK_TOPICS.find((t) => t.id === "shopping") || FALLBACK_TOPICS[0];
   const bestArticle = articles
     .map((article) => {
       const t = bestTopicForArticle(article);

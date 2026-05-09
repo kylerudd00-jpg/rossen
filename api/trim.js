@@ -78,15 +78,19 @@ function concatSegments(segPaths, outPath) {
       .input(listPath)
       .inputOptions(["-f concat", "-safe 0"])
       .outputOptions(["-c copy"])
-      .on("error", (err) => { try { unlinkSync(listPath); } catch {} reject(err); })
-      .on("end", () => { try { unlinkSync(listPath); } catch {} resolve(); })
+      .on("error", (err) => { cleanup(listPath); reject(err); })
+      .on("end", () => { cleanup(listPath); resolve(); })
       .save(outPath);
   });
 }
 
 function cleanup(...paths) {
   for (const p of paths) {
-    try { if (existsSync(p)) unlinkSync(p); } catch {}
+    try {
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      // Best-effort temp file cleanup.
+    }
   }
 }
 

@@ -14,7 +14,9 @@ try {
     const val = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
     if (key && !process.env[key]) process.env[key] = val;
   }
-} catch {}
+} catch {
+  // .env is optional in Vercel and local test environments.
+}
 
 const OFF_BASE = "https://world.openfoodfacts.org/api/v2/product";
 

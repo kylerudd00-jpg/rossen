@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
 const VERDICT_CONFIG = {
@@ -65,7 +65,9 @@ function ResultCard({ result, onReset }) {
 
 export default function BarcodeScanner() {
   const videoRef = useRef(null);
-  const readerRef = useRef(null);
+  const controlsRef = useRef(null);
+  const pendingLookupRef = useRef(false);
+  const cameraRunRef = useRef(0);
   const [mode, setMode] = useState("camera"); // camera | manual
   const [scanning, setScanning] = useState(false);
   const [manualUpc, setManualUpc] = useState("");
@@ -74,40 +76,7 @@ export default function BarcodeScanner() {
   const [result, setResult] = useState(null);
   const [cameraError, setCameraError] = useState(null);
 
-  useEffect(() => {
-    if (mode !== "camera" || status === "done") return;
-    startCamera();
-    return () => stopCamera();
-  }, [mode, status]);
-
-  async function startCamera() {
-    setCameraError(null);
-    setScanning(false);
-    try {
-      const reader = new BrowserMultiFormatReader();
-      readerRef.current = reader;
-      const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-      if (!devices.length) throw new Error("No camera found");
-      const deviceId = devices[devices.length - 1]?.deviceId; // prefer rear camera
-      await reader.decodeFromVideoDevice(deviceId, videoRef.current, (res, err) => {
-        if (res) {
-          stopCamera();
-          lookup(res.getText());
-        }
-        // scan errors ("no barcode yet") are normal — ignore
-      });
-      setScanning(true);
-    } catch (e) {
-      setCameraError(e.message || "Camera unavailable");
-    }
-  }
-
-  function stopCamera() {
-    try { readerRef.current?.reset(); } catch {}
-    setScanning(false);
-  }
-
-  async function lookup(upc) {
+  const lookup = useCallback(async (upc) => {
     setStatus("loading");
     setError(null);
     try {
@@ -120,7 +89,66 @@ export default function BarcodeScanner() {
       setError(e.message);
       setStatus("error");
     }
-  }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    cameraRunRef.current += 1;
+    controlsRef.current?.stop();
+    controlsRef.current = null;
+    setScanning(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    if (controlsRef.current) return;
+
+    const runId = cameraRunRef.current + 1;
+    cameraRunRef.current = runId;
+    setCameraError(null);
+    setScanning(false);
+    pendingLookupRef.current = false;
+
+    try {
+      const reader = new BrowserMultiFormatReader();
+      const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+      if (!devices.length) throw new Error("No camera found");
+      const deviceId = devices[devices.length - 1]?.deviceId; // prefer rear camera
+      const controls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (res, _err, activeControls) => {
+        if (cameraRunRef.current !== runId) return;
+        if (res) {
+          if (pendingLookupRef.current) return;
+          pendingLookupRef.current = true;
+          cameraRunRef.current += 1;
+          activeControls?.stop();
+          controlsRef.current = null;
+          setScanning(false);
+          lookup(res.getText());
+        }
+        // Scan errors ("no barcode yet") are normal.
+      });
+
+      if (cameraRunRef.current !== runId || pendingLookupRef.current) {
+        controls.stop();
+        return;
+      }
+
+      controlsRef.current = controls;
+      setScanning(true);
+    } catch (e) {
+      controlsRef.current = null;
+      setScanning(false);
+      setCameraError(e.message || "Camera unavailable");
+    }
+  }, [lookup]);
+
+  useEffect(() => {
+    if (mode !== "camera" || status !== "idle") {
+      stopCamera();
+      return undefined;
+    }
+
+    startCamera();
+    return () => stopCamera();
+  }, [mode, status, startCamera, stopCamera]);
 
   function handleManualSubmit(e) {
     e.preventDefault();
@@ -130,6 +158,7 @@ export default function BarcodeScanner() {
   }
 
   function reset() {
+    pendingLookupRef.current = false;
     setStatus("idle");
     setResult(null);
     setError(null);

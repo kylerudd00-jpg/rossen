@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import StoryResearch from "./StoryResearch.jsx";
 import VideoHub from "./VideoHub.jsx";
@@ -213,7 +213,7 @@ function PostCard({ post }) {
   const [captionLoading, setCaptionLoading] = useState(false);
   const [captionCopied, setCaptionCopied] = useState(false);
 
-  const candidates = post.imageCandidates || [];
+  const candidates = useMemo(() => post.imageCandidates || [], [post.imageCandidates]);
   const activeImage = candidates[imageIdx] || post.imageUrl || null;
   const activeCrop = normalizeCrop(cropByImage[activeImage] || {});
   const cropX = activeCrop.x;
@@ -319,7 +319,9 @@ function PostCard({ post }) {
       await navigator.clipboard.writeText(caption);
       setCaptionCopied(true);
       setTimeout(() => setCaptionCopied(false), 2000);
-    } catch {}
+    } catch (e) {
+      console.warn("[caption] copy failed", e);
+    }
   }
 
   const headlineLines = (editableHeadline || "").split("\n").filter(Boolean);

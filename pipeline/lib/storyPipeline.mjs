@@ -6,8 +6,11 @@ import { researchStoriesWithOpenAI } from "./openaiResearch.mjs";
 import { researchStoriesWithGemini } from "./geminiResearch.mjs";
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const DISK_CACHE_PATH = join(process.cwd(), ".pipeline-cache.json");
+const DISK_CACHE_PATH = process.env.VERCEL
+  ? join(tmpdir(), "deal-pipeline-cache.json")
+  : join(process.cwd(), ".pipeline-cache.json");
 
 function readDiskCache() {
   try {

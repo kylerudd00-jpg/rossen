@@ -34,7 +34,6 @@ function StoryPacketCard({ packet, index, onBundle, onMakePost }) {
   const pitch = packet.pitch || sources[0]?.summary || "A Rossen-style consumer story.";
   const hook = packet.hook || sources[0]?.title || "Start with the clearest viewer-facing proof.";
   const viewerTakeaway = packet.viewerTakeaway || angles[2] || "Give viewers one clear action step.";
-  const sourceCount = Number(packet.sourceCount || sources.length || 0);
 
   return (
     <article className="packet-card packet-card--flat">
