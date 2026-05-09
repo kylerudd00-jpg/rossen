@@ -4,6 +4,27 @@ import { scoreCandidate } from "./scoring.mjs";
 import { agentSearch } from "./agentSearch.mjs";
 import { researchStoriesWithOpenAI } from "./openaiResearch.mjs";
 import { researchStoriesWithGemini } from "./geminiResearch.mjs";
+import { readFileSync, writeFileSync } from "fs";
+import { join } from "path";
+
+const DISK_CACHE_PATH = join(process.cwd(), ".pipeline-cache.json");
+
+function readDiskCache() {
+  try {
+    const raw = readFileSync(DISK_CACHE_PATH, "utf8");
+    const { stories, savedAt, ttl } = JSON.parse(raw);
+    if (Date.now() - savedAt < ttl) return { stories, savedAt, ttl };
+  } catch {}
+  return null;
+}
+
+function writeDiskCache(stories, ttl) {
+  try {
+    writeFileSync(DISK_CACHE_PATH, JSON.stringify({ stories, savedAt: Date.now(), ttl }));
+  } catch (e) {
+    console.warn("[pipeline] Could not write disk cache:", e.message);
+  }
+}
 
 function envNumber(env, key, fallback) {
   const value = Number(env?.[key]);
@@ -424,7 +445,7 @@ PRIORITY BRANDS: Costco, Walmart, Target, Amazon, Sam's Club, Trader Joe's, Aldi
 For each selected article, identify the ONE specific brand with the most concrete deal. Return that brand name.
 
 Return ONLY a JSON array of up to 24 selected stories. [] if nothing qualifies. No other text.
-[{"id":"...","brand":"BRAND NAME ALL CAPS"}, ...]`;
+[{"n":1,"brand":"BRAND NAME ALL CAPS"}, ...]`;
 
 // ─── Fact extraction (replaces "write a headline" approach) ──────────────────
 // Instead of asking AI to write a headline (where it takes shortcuts),
@@ -1210,41 +1231,53 @@ export async function writeHeadline(candidate, keys, { useFallback = true } = {}
 }
 
 async function runFilterPass(candidates, keys) {
-  const payload = candidates.map((c) => ({
-    id: c.id,
+  // Use 1-based numeric index (n) instead of hash ID so Groq can reproduce it faithfully
+  const payload = candidates.map((c, i) => ({
+    n: i + 1,
     brand: c.brand,
     title: c.title,
     summary: (c.rawSummary || "").slice(0, 200),
   }));
 
-  // Groq: batch into groups of 20 (smaller payload, short summaries) to avoid 413
   const hasGemini = !!keys.geminiKey;
   let picks = [];
+  let geminiSucceeded = false;
 
   if (hasGemini) {
-    const text = await gemini(FILTER_PROMPT, JSON.stringify(payload), keys, { maxTokens: 900 });
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) {
-      try { picks = JSON.parse(match[0]); } catch {}
+    try {
+      const text = await gemini(FILTER_PROMPT, JSON.stringify(payload), { geminiKey: keys.geminiKey }, { maxTokens: 900 });
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) {
+        try { picks = JSON.parse(match[0]); geminiSucceeded = true; } catch {}
+      }
+    } catch (e) {
+      console.warn("[pipeline] Gemini filter failed, falling back to Groq batching:", e.message);
     }
-  } else {
+  }
+
+  if (!geminiSucceeded) {
     const BATCH = 20;
     for (let i = 0; i < payload.length; i += BATCH) {
       const batchPayload = payload.slice(i, i + BATCH).map((c) => ({
-        id: c.id, brand: c.brand, title: c.title, summary: c.summary.slice(0, 80),
+        n: c.n, brand: c.brand, title: c.title, summary: c.summary.slice(0, 80),
       }));
-      const text = await gemini(FILTER_PROMPT, JSON.stringify(batchPayload), keys, { maxTokens: 400 });
-      const match = text.match(/\[[\s\S]*\]/);
-      if (match) {
-        try {
-          const batch = JSON.parse(match[0]);
-          if (Array.isArray(batch)) picks.push(...batch);
-        } catch {}
+      try {
+        const text = await gemini(FILTER_PROMPT, JSON.stringify(batchPayload), { groqKey: keys.groqKey }, { maxTokens: 900 });
+        const match = text.match(/\[[\s\S]*\]/);
+        if (match) {
+          try {
+            const batch = JSON.parse(match[0]);
+            if (Array.isArray(batch)) picks.push(...batch);
+          } catch {}
+        }
+      } catch (e) {
+        console.warn("[pipeline] Groq filter batch failed:", e.message);
       }
       if (picks.length >= 24) break;
     }
   }
 
+  console.log(`[pipeline] runFilterPass: ${picks.length} picks from ${candidates.length} candidates`);
   return Array.isArray(picks) ? picks.slice(0, 24) : [];
 }
 
@@ -1269,9 +1302,10 @@ async function filterAndRewriteWithAI(candidates, keys, progress) {
   // Step 2: write — each story gets its own focused headline call
   progress("Writing headlines…", 60);
   const toWrite = picks
-    .map(({ id, brand }) => {
-      const candidate = candidates.find((c) => c.id === id);
-      if (!candidate) return null;
+    .map(({ n, brand }) => {
+      const idx = Number(n);
+      const candidate = (idx >= 1 && idx <= candidates.length) ? candidates[idx - 1] : null;
+      if (!candidate) { console.warn(`[pipeline] Pick n=${n} out of range (${candidates.length} candidates)`); return null; }
       // Use the brand the AI identified (may be more specific for multi-brand articles)
       return brand && brand !== "RETAIL" ? { ...candidate, brand } : candidate;
     })
@@ -1297,10 +1331,9 @@ async function filterAndRewriteWithAI(candidates, keys, progress) {
   });
 
   const withHeadlines = results.filter(Boolean);
-  console.log(`[pipeline] Filtered to ${picks.length}, wrote ${withHeadlines.length} headlines`);
-  const minimumUsable = Math.min(6, Math.max(1, Math.ceil(picks.length * 0.4)));
-  if (withHeadlines.length < minimumUsable) {
-    throw new Error(`AI wrote only ${withHeadlines.length} usable headline${withHeadlines.length === 1 ? "" : "s"}`);
+  console.log(`[pipeline] Filtered to ${picks.length}, headline candidates ${toWrite.length}, wrote ${withHeadlines.length} AI headlines`);
+  if (withHeadlines.length === 0) {
+    throw new Error("AI wrote no usable headlines");
   }
   return withHeadlines;
 }
@@ -1318,6 +1351,19 @@ export async function fetchStories(progress = () => {}, { force = false } = {}) 
   if (!force && _cache && Date.now() - _cacheAt < _cacheTtl) {
     progress("Loading today's stories…", 100);
     return _cache;
+  }
+
+  // Check disk cache before hitting the network/AI
+  if (!force) {
+    const disk = readDiskCache();
+    if (disk) {
+      console.log("[pipeline] Serving from disk cache");
+      _cache = disk.stories;
+      _cacheAt = disk.savedAt;
+      _cacheTtl = disk.ttl;
+      progress("Loading today's stories…", 100);
+      return _cache;
+    }
   }
 
   // If a pipeline run is already in progress, wait for it instead of starting another
@@ -1342,9 +1388,8 @@ async function _runPipeline(progress = () => {}, { force = false } = {}) {
       const results = await researchStoriesWithOpenAI(process.env, progress);
       progress(`Done — ${results.length} verified stories ready`, 100);
       console.log(`[pipeline] OpenAI returned ${results.length} verified stories`);
-      _cache = results;
-      _cacheAt = Date.now();
-      _cacheTtl = CACHE_TTL;
+      _cache = results; _cacheAt = Date.now(); _cacheTtl = CACHE_TTL;
+      writeDiskCache(results, CACHE_TTL);
       return results;
     } catch (e) {
       console.warn(`[pipeline] OpenAI research failed, trying backup pipeline: ${e.message}`);
@@ -1358,9 +1403,8 @@ async function _runPipeline(progress = () => {}, { force = false } = {}) {
       const results = await researchStoriesWithGemini(process.env, progress);
       progress(`Done — ${results.length} verified stories ready`, 100);
       console.log(`[pipeline] Gemini returned ${results.length} verified stories`);
-      _cache = results;
-      _cacheAt = Date.now();
-      _cacheTtl = CACHE_TTL;
+      _cache = results; _cacheAt = Date.now(); _cacheTtl = CACHE_TTL;
+      writeDiskCache(results, CACHE_TTL);
       return results;
     } catch (e) {
       console.warn(`[pipeline] Gemini research failed, trying backup pipeline: ${e.message}`);
@@ -1385,9 +1429,8 @@ async function _runPipeline(progress = () => {}, { force = false } = {}) {
       const results = await filterAndRewriteWithAI(candidates.slice(0, aiCandidateLimit), keys, progress);
       progress(`Done — ${results.length} stories ready`, 100);
       console.log(`[pipeline] ${results.length} stories with headlines`);
-      _cache = results;
-      _cacheAt = Date.now();
-      _cacheTtl = CACHE_TTL;
+      _cache = results; _cacheAt = Date.now(); _cacheTtl = CACHE_TTL;
+      writeDiskCache(results, CACHE_TTL);
       return results;
     } catch (e) {
       const fallback = fallbackStoriesWithHeadlines(candidates);
@@ -1396,9 +1439,8 @@ async function _runPipeline(progress = () => {}, { force = false } = {}) {
         progress(message, 85);
         progress(`Done — ${fallback.length} fallback stories ready`, 100);
         console.warn(`[pipeline] AI pipeline unavailable, using fallback headlines: ${e.message}`);
-        _cache = fallback;
-        _cacheAt = Date.now();
-        _cacheTtl = FALLBACK_CACHE_TTL;
+        _cache = fallback; _cacheAt = Date.now(); _cacheTtl = FALLBACK_CACHE_TTL;
+        writeDiskCache(fallback, FALLBACK_CACHE_TTL);
         return fallback;
       }
       throw new Error("AI is temporarily unavailable and no fallback stories were available. Try again in a few minutes.");
@@ -1408,9 +1450,8 @@ async function _runPipeline(progress = () => {}, { force = false } = {}) {
   const fallback = fallbackStoriesWithHeadlines(candidates);
   if (fallback.length > 0) {
     progress(`Done — ${fallback.length} fallback stories ready`, 100);
-    _cache = fallback;
-    _cacheAt = Date.now();
-    _cacheTtl = FALLBACK_CACHE_TTL;
+    _cache = fallback; _cacheAt = Date.now(); _cacheTtl = FALLBACK_CACHE_TTL;
+    writeDiskCache(fallback, FALLBACK_CACHE_TTL);
     return fallback;
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import StoryResearch from "./StoryResearch.jsx";
 import VideoHub from "./VideoHub.jsx";
+import BarcodeScanner from "./BarcodeScanner.jsx";
 
 const SEARCH_SOURCES = [
   "Brave Search", "Tavily", "Google News", "Hip2Save", "Slickdeals",
@@ -475,7 +476,7 @@ function StoryCard({ story, selected, onToggle, disabled, onUpdateHeadline }) {
                 <span key={i} className={`story-headline-line${i === 0 ? " story-headline-brand" : ""}`}>{line}</span>
               ))}
               {story.headlineProvider === "fallback" && (
-                <span className="headline-fallback-badge" title="Auto-generated headline (AI unavailable)">~</span>
+                <span className="headline-fallback-badge" title="AI unavailable — headline generated from fallback rules">AI FALLBACK</span>
               )}
             </div>
           ) : (
@@ -743,7 +744,7 @@ export default function App() {
             className={`header-tab${activeTab === "instagram" ? " header-tab--active" : ""}`}
             onClick={() => setActiveTab("instagram")}
           >
-            Instagram Posts
+            Posts
           </button>
           <button
             className={`header-tab${activeTab === "research" ? " header-tab--active" : ""}`}
@@ -757,6 +758,12 @@ export default function App() {
           >
             Video
           </button>
+          <button
+            className={`header-tab${activeTab === "scan" ? " header-tab--active" : ""}`}
+            onClick={() => setActiveTab("scan")}
+          >
+            Scan
+          </button>
         </nav>
         {/* desktop right — hidden on mobile */}
 
@@ -764,7 +771,7 @@ export default function App() {
           {activeTab === "instagram" && lastFetched && (
             <div className="header-status">
               <span className="status-dot" />
-              Last refreshed {formatTimeAgo(lastFetched)}
+              {formatTimeAgo(lastFetched)}
             </div>
           )}
           {activeTab === "instagram" && (phase === "selecting" || phase === "done") && (
@@ -786,22 +793,29 @@ export default function App() {
           className={`bottom-nav-btn${activeTab === "instagram" ? " bottom-nav-btn--active" : ""}`}
           onClick={() => setActiveTab("instagram")}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.874v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
           <span>Posts</span>
         </button>
         <button
           className={`bottom-nav-btn${activeTab === "research" ? " bottom-nav-btn--active" : ""}`}
           onClick={() => setActiveTab("research")}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 2a8 8 0 1 0 5.293 14.707l3.707 3.707 1.414-1.414-3.707-3.707A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12A6 6 0 0 1 10 4z"/></svg>
           <span>Research</span>
         </button>
         <button
           className={`bottom-nav-btn${activeTab === "video" ? " bottom-nav-btn--active" : ""}`}
           onClick={() => setActiveTab("video")}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
           <span>Video</span>
+        </button>
+        <button
+          className={`bottom-nav-btn${activeTab === "scan" ? " bottom-nav-btn--active" : ""}`}
+          onClick={() => setActiveTab("scan")}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><line x1="16" y1="16" x2="21" y2="16"/><line x1="16" y1="19" x2="21" y2="19"/><line x1="19" y1="16" x2="19" y2="21"/></svg>
+          <span>Scan</span>
         </button>
       </nav>
 
@@ -816,6 +830,13 @@ export default function App() {
       {activeTab === "video" && (
         <main className="app-main app-main--video">
           <VideoHub />
+        </main>
+      )}
+
+      {/* ── Scan Tab ── */}
+      {activeTab === "scan" && (
+        <main className="app-main app-main--scan">
+          <BarcodeScanner />
         </main>
       )}
 

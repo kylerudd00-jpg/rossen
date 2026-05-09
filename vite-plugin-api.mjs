@@ -5,6 +5,7 @@ import { searchImagesForBrand } from "./pipeline/lib/imageSearch.mjs";
 import { gemini } from "./pipeline/lib/gemini.mjs";
 import { writeOpenAIHeadline } from "./pipeline/lib/openaiResearch.mjs";
 import segmentsHandler from "./api/segments.js";
+import trimHandler from "./api/trim.js";
 
 // Vite doesn't push .env into process.env for plugins — load it manually
 function loadDotEnv() {
@@ -154,6 +155,22 @@ export function apiPlugin() {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
           }
+          return;
+        }
+
+        if (url.pathname === "/api/trim") {
+          try {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const raw = Buffer.concat(chunks).toString();
+            req.body = raw ? JSON.parse(raw) : {};
+          } catch (e) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: e.message }));
+            return;
+          }
+          await trimHandler(req, res);
           return;
         }
 

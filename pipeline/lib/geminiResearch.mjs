@@ -1,7 +1,7 @@
 import { executeSearch } from "./agentSearch.mjs";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 function envNumber(env, key, fallback) {
   const value = Number(env?.[key]);
@@ -246,7 +246,7 @@ async function callGroq(apiKey, systemPrompt, userPrompt, timeoutMs) {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: "llama-3.1-8b-instant",
+      model: "llama-3.3-70b-versatile", // separate TPM pool from filter pass
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
