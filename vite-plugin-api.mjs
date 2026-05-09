@@ -1,26 +1,36 @@
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { fetchStories, writeHeadline } from "./pipeline/lib/storyPipeline.mjs";
 import { searchImagesForBrand } from "./pipeline/lib/imageSearch.mjs";
 import { gemini } from "./pipeline/lib/gemini.mjs";
 import { writeOpenAIHeadline } from "./pipeline/lib/openaiResearch.mjs";
 import segmentsHandler from "./api/segments.js";
 import trimHandler from "./api/trim.js";
+import barcodeHandler from "./api/barcode.js";
 
 // Vite doesn't push .env into process.env for plugins — load it manually
 function loadDotEnv() {
-  try {
-    const content = readFileSync(join(process.cwd(), ".env"), "utf8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq < 0) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-      if (key && !process.env[key]) process.env[key] = val;
-    }
-  } catch {}
+  // Try both this file's directory and process.cwd() to handle worktrees
+  const candidates = [
+    dirname(fileURLToPath(import.meta.url)),
+    process.cwd(),
+  ];
+  for (const dir of candidates) {
+    try {
+      const content = readFileSync(join(dir, ".env"), "utf8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq < 0) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+        if (key && !process.env[key]) process.env[key] = val;
+      }
+      return; // stop after first .env found
+    } catch {}
+  }
 }
 loadDotEnv();
 
@@ -155,6 +165,11 @@ export function apiPlugin() {
             res.statusCode = 500;
             res.end(JSON.stringify({ error: e.message }));
           }
+          return;
+        }
+
+        if (url.pathname === "/api/barcode") {
+          await barcodeHandler(req, res);
           return;
         }
 

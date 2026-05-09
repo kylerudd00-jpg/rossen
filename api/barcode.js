@@ -1,4 +1,20 @@
 import { gemini } from "../pipeline/lib/gemini.mjs";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// Load .env relative to this file's directory (works in worktrees and on Vercel)
+try {
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  const content = readFileSync(join(root, ".env"), "utf8");
+  for (const line of content.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq < 1 || line.trim().startsWith("#")) continue;
+    const key = line.slice(0, eq).trim();
+    const val = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    if (key && !process.env[key]) process.env[key] = val;
+  }
+} catch {}
 
 const OFF_BASE = "https://world.openfoodfacts.org/api/v2/product";
 
@@ -23,58 +39,24 @@ async function lookupProduct(upc) {
   };
 }
 
-async function searchPrices(product, tavilyKey) {
-  const query = `${product.brand} ${product.name} ${product.quantity} grocery price store 2026`.trim();
-  const res = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      api_key: tavilyKey,
-      query,
-      search_depth: "basic",
-      max_results: 8,
-      include_answer: false,
-    }),
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.results || [];
-}
-
-async function synthesizePrices(product, searchResults, keys) {
-  const snippets = searchResults
-    .map(r => `${r.title}\n${r.content}`)
-    .join("\n\n---\n\n");
-
-  const userContent = `Product: ${product.brand} ${product.name} (${product.quantity})\n\nSearch results:\n${snippets}`;
+async function estimatePrices(product, keys) {
+  const productDesc = `${product.brand} ${product.name}${product.quantity ? ` (${product.quantity})` : ""}`.trim();
 
   const raw = await gemini(
-    `You are a consumer price analyst. Extract grocery store prices for this product from the search results.
+    `You are a consumer price expert. Based on your knowledge of US grocery store pricing, estimate the typical retail prices for this product at major chains (Walmart, Kroger, Target, Costco if applicable).
 
-Return a JSON object (no markdown) with this exact shape:
-{
-  "prices": [
-    {"store": "Kroger", "price": 3.99, "unit": "12 oz", "note": "sale through 5/15"},
-    ...
-  ],
-  "avgPrice": 4.29,
-  "verdict": "great deal" | "fair price" | "overpriced" | "unknown",
-  "verdictReason": "one short sentence"
-}
+Return a JSON object (no markdown, no explanation) with this exact shape:
+{"prices":[{"store":"Walmart","price":3.98},{"store":"Kroger","price":4.29},{"store":"Target","price":4.49}],"avgPrice":4.25,"verdict":"fair price","verdictReason":"Typical retail price range for this product"}
 
-Rules:
-- Only include prices you can clearly extract from the text. Skip guesses.
-- "note" is optional (only if there's a sale end date or condition).
-- If fewer than 2 prices found, set verdict to "unknown" and verdictReason to "Not enough price data found."
-- avgPrice = average of found prices (or null if unknown).
-- Return valid JSON only, no explanation.`,
-    userContent,
+Verdict must be one of: "great deal" | "fair price" | "overpriced" | "unknown"
+If you don't have reliable price knowledge for this product, set verdict to "unknown" and prices to [].
+Return valid JSON only.`,
+    `Product: ${productDesc}`,
     keys,
-    { maxTokens: 512 }
+    { maxTokens: 400, temperature: 0 }
   );
 
-  const cleaned = raw.replace(/^```json\s*/i, "").replace(/\s*```$/, "").trim();
+  const cleaned = raw.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
   return JSON.parse(cleaned);
 }
 
@@ -82,34 +64,36 @@ export default async function handler(req, res) {
   const params = new URL(req.url, "http://localhost").searchParams;
   const upc = params.get("upc")?.replace(/\D/g, "");
 
-  if (!upc) return res.status(400).json({ error: "Missing upc" });
+  const json = (statusCode, data) => {
+    res.statusCode = statusCode;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(data));
+  };
+
+  if (!upc) return json(400, { error: "Missing upc" });
 
   const env = process.env;
   const keys = { geminiKey: env.GEMINI_API_KEY, groqKey: env.GROQ_API_KEY };
-  const tavilyKey = env.TAVILY_API_KEY;
 
   const product = await lookupProduct(upc).catch(() => null);
   if (!product || !product.name) {
-    return res.status(404).json({ error: "Product not found. Try entering the name manually." });
+    return json(404, { error: "Product not found. Try entering the name manually." });
   }
 
   let prices = [];
   let avgPrice = null;
-  let verdict = { label: "unknown", reason: "Price search unavailable." };
+  let verdict = { label: "unknown", reason: "Price data not available." };
 
-  if (tavilyKey) {
+  if (keys.geminiKey || keys.groqKey) {
     try {
-      const results = await searchPrices(product, tavilyKey);
-      if (results.length > 0 && (keys.geminiKey || keys.groqKey)) {
-        const parsed = await synthesizePrices(product, results, keys);
-        prices = parsed.prices || [];
-        avgPrice = parsed.avgPrice || null;
-        verdict = { label: parsed.verdict || "unknown", reason: parsed.verdictReason || "" };
-      }
+      const parsed = await estimatePrices(product, keys);
+      prices = parsed.prices || [];
+      avgPrice = parsed.avgPrice || null;
+      verdict = { label: parsed.verdict || "unknown", reason: parsed.verdictReason || "" };
     } catch (e) {
-      console.warn("[barcode] price synthesis failed:", e.message);
+      console.warn("[barcode] price estimation failed:", e.message);
     }
   }
 
-  res.json({ product, prices, avgPrice, verdict });
+  json(200, { product, prices, avgPrice, verdict });
 }
