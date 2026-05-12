@@ -16,27 +16,41 @@ try {
   }
 } catch {}
 
-const OFF_BASE = "https://world.openfoodfacts.org/api/v2/product";
+// Try food → beauty → general products → pet food in order
+const OFF_BASES = [
+  "https://world.openfoodfacts.org/api/v2/product",
+  "https://world.openbeautyfacts.org/api/v2/product",
+  "https://world.openproductsfacts.org/api/v2/product",
+  "https://world.openpetfoodfacts.org/api/v2/product",
+];
+const FIELDS = "product_name,product_name_en,brands,image_url,image_front_url,quantity,categories_tags";
 
 async function lookupProduct(upc) {
-  const res = await fetch(`${OFF_BASE}/${upc}?fields=product_name,product_name_en,brands,image_url,image_front_url,quantity,categories_tags`, {
-    headers: { "User-Agent": "RossenReports/1.0 (contact@rossenreports.com)" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data.status !== 1) return null;
-  const p = data.product;
-  return {
-    name: p.product_name_en || p.product_name || "",
-    brand: p.brands || "",
-    imageUrl: p.image_front_url || p.image_url || "",
-    quantity: p.quantity || "",
-    categories: (p.categories_tags || [])
-      .filter(t => t.startsWith("en:"))
-      .map(t => t.replace("en:", "").replace(/-/g, " "))
-      .slice(0, 3),
-  };
+  for (const base of OFF_BASES) {
+    try {
+      const res = await fetch(`${base}/${upc}?fields=${FIELDS}`, {
+        headers: { "User-Agent": "RossenReports/1.0 (contact@rossenreports.com)" },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.status !== 1) continue;
+      const p = data.product;
+      const name = p.product_name_en || p.product_name || "";
+      if (!name) continue;
+      return {
+        name,
+        brand: p.brands || "",
+        imageUrl: p.image_front_url || p.image_url || "",
+        quantity: p.quantity || "",
+        categories: (p.categories_tags || [])
+          .filter(t => t.startsWith("en:"))
+          .map(t => t.replace("en:", "").replace(/-/g, " "))
+          .slice(0, 3),
+      };
+    } catch {}
+  }
+  return null;
 }
 
 async function estimatePrices(product, keys) {
